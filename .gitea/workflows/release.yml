@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Test
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Build Release Binary
+        run: cargo build --locked --release
+
+      - name: Package Linux Artifact
+        run: |
+          artifact="${{ github.event.repository.name }}-linux-amd64"
+          mkdir -p dist
+          cp target/release/redactor "dist/${artifact}"
+          tar -C dist -czf "${artifact}.tar.gz" "${artifact}"
+          sha256sum "${artifact}.tar.gz" > "${artifact}.tar.gz.sha256"
+
+      - name: Read Crate Metadata
+        id: crate_meta
+        run: |
+          crate_name="$(sed -n 's/^name = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          echo "name=${crate_name}" >> "$GITHUB_OUTPUT"
+          echo "version=${crate_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Check Kellnr Version
+        id: kellnr_check
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          crate_name="${{ steps.crate_meta.outputs.name }}"
+          crate_version="${{ steps.crate_meta.outputs.version }}"
+          if cargo search --registry kellnr "${crate_name}" --limit 20 | grep -F "${crate_name} = \"${crate_version}\"" >/dev/null; then
+            echo "publish_needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish Crate To Kellnr
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && steps.kellnr_check.outputs.publish_needed == 'true'
+        env:
+          CARGO_REGISTRIES_KELLNR_TOKEN: ${{ secrets.KELLNR_TOKEN }}
+        run: cargo publish --locked --registry kellnr
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ github.event.repository.name }}-linux-amd64.tar.gz
+            ${{ github.event.repository.name }}-linux-amd64.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete Old Latest Release
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${{ github.api_url }}/repos/${{ github.repository }}/releases/tags/latest" || true
+
+      - name: Update Latest Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: Latest Build
+          files: |
+            ${{ github.event.repository.name }}-linux-amd64.tar.gz
+            ${{ github.event.repository.name }}-linux-amd64.tar.gz.sha256
+          prerelease: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

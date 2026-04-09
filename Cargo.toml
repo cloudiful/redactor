@@ -2,6 +2,8 @@
 name = "redactor"
 version = "0.1.0"
 edition = "2024"
+publish = ["kellnr"]
+repository = "ssh://git@gitea.cloud1ful.com:2223/tools/redactor.git"
 
 [dependencies]
 anyhow = "1.0.100"
