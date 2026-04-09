@@ -36,14 +36,6 @@ jobs:
       - name: Build Release Binary
         run: cargo build --locked --release
 
-      - name: Package Linux Artifact
-        run: |
-          artifact="${{ github.event.repository.name }}-linux-amd64"
-          mkdir -p dist
-          cp target/release/redactor "dist/${artifact}"
-          tar -C dist -czf "${artifact}.tar.gz" "${artifact}"
-          sha256sum "${artifact}.tar.gz" > "${artifact}.tar.gz.sha256"
-
       - name: Read Crate Metadata
         id: crate_meta
         run: |
@@ -71,13 +63,21 @@ jobs:
           CARGO_REGISTRIES_KELLNR_TOKEN: ${{ secrets.KELLNR_TOKEN }}
         run: cargo publish --locked --registry kellnr
 
+      - name: Package Linux Artifact
+        run: |
+          artifact="${{ github.event.repository.name }}-linux-amd64"
+          mkdir -p target/dist
+          cp target/release/redactor "target/dist/${artifact}"
+          tar -C target/dist -czf "target/dist/${artifact}.tar.gz" "${artifact}"
+          sha256sum "target/dist/${artifact}.tar.gz" > "target/dist/${artifact}.tar.gz.sha256"
+
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            ${{ github.event.repository.name }}-linux-amd64.tar.gz
-            ${{ github.event.repository.name }}-linux-amd64.tar.gz.sha256
+            target/dist/${{ github.event.repository.name }}-linux-amd64.tar.gz
+            target/dist/${{ github.event.repository.name }}-linux-amd64.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -94,8 +94,8 @@ jobs:
           tag_name: latest
           name: Latest Build
           files: |
-            ${{ github.event.repository.name }}-linux-amd64.tar.gz
-            ${{ github.event.repository.name }}-linux-amd64.tar.gz.sha256
+            target/dist/${{ github.event.repository.name }}-linux-amd64.tar.gz
+            target/dist/${{ github.event.repository.name }}-linux-amd64.tar.gz.sha256
           prerelease: true
           make_latest: true
         env:
