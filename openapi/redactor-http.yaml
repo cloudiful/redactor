@@ -1,0 +1,210 @@
+openapi: 3.1.0
+info:
+  title: Redactor HTTP API
+  version: 0.2.0
+  description: Standalone text redaction and restoration endpoints exposed by redactor-http.
+servers:
+  - url: http://127.0.0.1:8787
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      operationId: healthz
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                required: [status]
+  /redact/text:
+    post:
+      summary: Redact text and return an encrypted session blob
+      operationId: redactText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedactTextRequest"
+      responses:
+        "200":
+          description: Redaction succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedactTextResponse"
+        "500":
+          description: Redaction failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /restore/text:
+    post:
+      summary: Restore text using a previously issued encrypted session blob
+      operationId: restoreText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreTextRequest"
+      responses:
+        "200":
+          description: Restore succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreResult"
+        "422":
+          description: Restore validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /inspect/session:
+    post:
+      summary: Inspect an encrypted session without exposing original plaintext values
+      operationId: inspectSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectSessionRequest"
+      responses:
+        "200":
+          description: Session metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSummary"
+        "422":
+          description: Invalid encrypted session payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    RedactTextRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+        input_kind:
+          $ref: "#/components/schemas/InputKind"
+          default: text
+      required: [text]
+    RestoreTextRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+        encrypted_session:
+          type: string
+      required: [text, encrypted_session]
+    InspectSessionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        encrypted_session:
+          type: string
+      required: [encrypted_session]
+    RedactTextResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        redacted_text:
+          type: string
+        encrypted_session:
+          type: string
+        session_summary:
+          $ref: "#/components/schemas/SessionSummary"
+      required: [redacted_text, encrypted_session, session_summary]
+    RestoreResult:
+      type: object
+      additionalProperties: false
+      properties:
+        restored_text:
+          type: string
+        restored_count:
+          type: integer
+          minimum: 0
+        unresolved_tokens:
+          type: array
+          items:
+            type: string
+        validation_errors:
+          type: array
+          items:
+            type: string
+      required: [restored_text, restored_count, unresolved_tokens, validation_errors]
+    SessionSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+        session_id:
+          type: string
+        fingerprint:
+          type: string
+        redacted_fingerprint:
+          type: string
+        entry_count:
+          type: integer
+          minimum: 0
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEntrySummary"
+      required:
+        - version
+        - session_id
+        - fingerprint
+        - redacted_fingerprint
+        - entry_count
+        - entries
+    SessionEntrySummary:
+      type: object
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+        kind:
+          type: string
+        replacement_hint:
+          type:
+            - string
+            - "null"
+        occurrences:
+          type: integer
+          minimum: 0
+      required: [token, kind, replacement_hint, occurrences]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          properties:
+            message:
+              type: string
+            kind:
+              type: string
+          required: [message, kind]
+      required: [error]
+    InputKind:
+      type: string
+      enum: [text, git_diff]

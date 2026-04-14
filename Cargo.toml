@@ -1,0 +1,35 @@
+[workspace]
+members = ["crates/redactor", "crates/redactor-http", "crates/redactor-app"]
+default-members = ["crates/redactor", "crates/redactor-http", "crates/redactor-app"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.6"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/cloudiful/redactor"
+
+[workspace.dependencies]
+aes-gcm-siv = "0.11.1"
+anyhow = "1.0.102"
+async-stream = "0.3.6"
+axum = "0.8.9"
+base64 = "0.22.1"
+clap = { version = "4.6.0", features = [ "derive" ] }
+config = {package = "cloudiful-config" , version = "0.4.1" }
+futures-util = "0.3.32"
+getrandom = "0.4.2"
+hex = "0.4.3"
+ipnet = "2.12.0"
+pbkdf2 = "0.12.2"
+psl = "2.1.203"
+regex = "1.12.3"
+reqwest = { version = "0.13.2", default-features = false, features = [ "blocking", "json", "rustls", "stream" ] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+server = { package = "cloudiful-server", version = "0.2.1", default-features = false, features = ["axum"] }
+sha2 = "0.10.9"
+thiserror = "2.0.18"
+tokio = { version = "1.51.1", features = [ "macros", "rt-multi-thread", "signal", "net" ] }
+tower = { version = "0.5.3", features = ["util"] }
+url = "2.5.8"

@@ -1,0 +1,6 @@
+.git
+.gitea
+target
+.DS_Store
+redactor.toml
+crates/*/redactor.toml

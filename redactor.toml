@@ -1,0 +1,11 @@
+[llm]
+mode = "off"
+ollama_url = "http://localhost:11434"
+model = "gemma4:e2b"
+
+[proxy]
+listen = "127.0.0.1:8787"
+upstream = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+session_passphrase_env = "REDACTOR_SESSION_PASSPHRASE"
+cors_allowed_origins = []

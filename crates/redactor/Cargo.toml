@@ -1,0 +1,36 @@
+[package]
+name = "cloudiful-redactor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Structured text redaction with reversible sessions for secrets, domains, URLs, and related sensitive values."
+readme = "README.md"
+documentation = "https://docs.rs/cloudiful-redactor"
+homepage = "https://github.com/cloudiful/redactor"
+keywords = ["redaction", "privacy", "masking", "secrets"]
+categories = ["text-processing", "development-tools"]
+
+[dependencies]
+aes-gcm-siv.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+ipnet.workspace = true
+pbkdf2.workspace = true
+psl.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dependencies.reqwest]
+workspace = true
+optional = true
+
+[features]
+default = []
+ollama = ["dep:reqwest"]

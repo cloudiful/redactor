@@ -1,0 +1,28 @@
+[package]
+name = "redactor-app"
+version.workspace = true
+edition.workspace = true
+publish = false
+repository.workspace = true
+
+[[bin]]
+name = "redactor"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+config.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+redactor = { package = "cloudiful-redactor", path = "../redactor" }
+redactor-http = { path = "../redactor-http", optional = true }
+
+[dependencies.tokio]
+workspace = true
+optional = true
+
+[features]
+default = []
+ollama = ["redactor/ollama"]
+proxy = ["dep:redactor-http", "dep:tokio"]
