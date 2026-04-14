@@ -3,8 +3,8 @@ run-name: Build and Publish Docker by ${{ gitea.actor }}
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 jobs:
   docker:
