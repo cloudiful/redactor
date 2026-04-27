@@ -77,9 +77,18 @@ pub(crate) fn is_valid_cidr(value: &str) -> bool {
 
 pub(crate) fn is_valid_ip(value: &str) -> bool {
     match value.parse::<std::net::IpAddr>() {
-        Ok(ip) => !ip.is_unspecified(),
+        Ok(std::net::IpAddr::V4(ip)) => !ip.is_unspecified(),
+        Ok(std::net::IpAddr::V6(ip)) => !ip.is_unspecified() && is_substantial_ipv6(value),
         Err(_) => false,
     }
+}
+
+fn is_substantial_ipv6(value: &str) -> bool {
+    if value.contains('.') {
+        return true;
+    }
+
+    value.split(':').filter(|segment| !segment.is_empty()).count() >= 4
 }
 
 pub(crate) fn is_email_local(ch: char) -> bool {
@@ -182,6 +191,10 @@ mod tests {
     fn rejects_unspecified_ip_literals_used_as_scope_separators() {
         assert!(!is_valid_ip("::"));
         assert!(!is_valid_ip("0.0.0.0"));
-        assert!(is_valid_ip("2001:db8::1"));
+        assert!(!is_valid_ip("f32::"));
+        assert!(!is_valid_ip("2001:db8::1"));
+        assert!(!is_valid_ip("fe80::1"));
+        assert!(is_valid_ip("2001:db8:1:2::1"));
+        assert!(is_valid_ip("::ffff:192.168.1.10"));
     }
 }

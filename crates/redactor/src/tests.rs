@@ -353,3 +353,32 @@ fn code_scope_separators_are_not_detected_as_ips() {
             .all(|finding| finding.kind != crate::FindingKind::Ip)
     );
 }
+
+#[test]
+fn short_ipv6_fragments_are_not_detected_as_ips() {
+    let findings = RedactorBuilder::new()
+        .build()
+        .detect("f32::\n2001:db8::1\nfe80::1\n")
+        .expect("detect");
+
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.kind != crate::FindingKind::Ip)
+    );
+}
+
+#[test]
+fn substantial_ipv6_and_ipv4_still_detect_as_ips() {
+    let findings = RedactorBuilder::new()
+        .build()
+        .detect("2001:db8:1:2::1\n10.20.30.40\n")
+        .expect("detect");
+
+    assert!(findings.iter().any(|finding| {
+        finding.kind == crate::FindingKind::Ip && finding.match_text == "2001:db8:1:2::1"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding.kind == crate::FindingKind::Ip && finding.match_text == "10.20.30.40"
+    }));
+}
