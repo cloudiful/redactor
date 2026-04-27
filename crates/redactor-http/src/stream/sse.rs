@@ -201,11 +201,13 @@ impl Utf8ChunkDecoder {
 #[cfg(test)]
 mod tests {
     use super::SseStreamRestorer;
-    use redactor::RedactorBuilder;
+    use redactor::{FindingKind, RedactionRules, RedactorBuilder};
 
     #[test]
     fn stream_restorer_emits_sse_error_for_invalid_token() {
-        let redactor = RedactorBuilder::new().build();
+        let redactor = RedactorBuilder::new()
+            .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+            .build();
         let session = redactor
             .redact_with_session("domain=service.example.com")
             .expect("session");

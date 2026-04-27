@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
-use redactor::{InputKind, redact_text_artifact, redact_text_with_encrypted_session};
+use redactor::{
+    InputKind, RedactionRules, redact_text_artifact, redact_text_with_encrypted_session,
+};
 
 use crate::cli::{InputArgs, InputKindArgs, ReportArgs, SessionPassphraseArgs};
 use crate::io::read_input;
@@ -14,11 +16,12 @@ pub(crate) fn run(
     report: ReportArgs,
     input_kind: InputKindArgs,
     llm: ResolvedLlmArgs,
+    rules: RedactionRules,
     session_out: Option<PathBuf>,
     session_passphrase: SessionPassphraseArgs,
 ) -> Result<()> {
     let text = read_input(input.input)?;
-    let redactor = build_redactor(llm);
+    let redactor = build_redactor(llm, rules);
     let input_kind = InputKind::from(input_kind.input_kind);
 
     if let Some(path) = session_out {

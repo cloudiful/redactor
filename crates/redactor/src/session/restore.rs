@@ -116,11 +116,17 @@ fn token_like_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::restore_text_with_session;
-    use crate::RedactorBuilder;
+    use crate::{FindingKind, RedactionRules, Redactor, RedactorBuilder};
+
+    fn domain_redactor() -> Redactor {
+        RedactorBuilder::new()
+            .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+            .build()
+    }
 
     #[test]
     fn restore_streams_multiple_tokens_and_repetitions() {
-        let redactor = RedactorBuilder::new().build();
+        let redactor = domain_redactor();
         let text = "host=service.example.com alt=service.example.com";
         let session = redactor.redact_with_session(text).expect("session");
 
@@ -133,7 +139,7 @@ mod tests {
 
     #[test]
     fn restore_preserves_unknown_token_validation() {
-        let redactor = RedactorBuilder::new().build();
+        let redactor = domain_redactor();
         let session = redactor
             .redact_with_session("host=service.example.com")
             .expect("session");

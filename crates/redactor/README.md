@@ -28,3 +28,4 @@ fn main() -> anyhow::Result<()> {
 ```
 
 The crate keeps session-based restoration APIs available for reversible masking flows, including git diff handling through `InputKind::GitDiff`.
+Domain and person detection are disabled by default; configure `RedactionRules` when callers need those finding kinds.

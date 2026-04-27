@@ -4,8 +4,9 @@ mod stats;
 
 use crate::replace::apply_replacements;
 use crate::{
-    Finding, InputKind, LlmConfig, RedactionArtifact, RedactionResult, RedactionSession,
-    RedactorError, RestoreResult, restore_patch_with_session, restore_text_with_session,
+    Finding, InputKind, LlmConfig, RedactionArtifact, RedactionResult, RedactionRules,
+    RedactionSession, RedactorError, RestoreResult, restore_patch_with_session,
+    restore_text_with_session,
 };
 use detection::detect_internal;
 use session::SessionRedactorExt;
@@ -14,7 +15,7 @@ use stats::stats_for;
 #[derive(Debug, Clone, Default)]
 pub struct RedactorBuilder {
     llm: Option<LlmConfig>,
-    person_detection: bool,
+    rules: RedactionRules,
 }
 
 impl RedactorBuilder {
@@ -28,14 +29,19 @@ impl RedactorBuilder {
     }
 
     pub fn with_person_detection(mut self, enabled: bool) -> Self {
-        self.person_detection = enabled;
+        self.rules.person = enabled;
+        self
+    }
+
+    pub fn with_redaction_rules(mut self, rules: RedactionRules) -> Self {
+        self.rules = rules;
         self
     }
 
     pub fn build(self) -> Redactor {
         Redactor {
             llm: self.llm,
-            person_detection: self.person_detection,
+            rules: self.rules,
         }
     }
 }
@@ -43,7 +49,7 @@ impl RedactorBuilder {
 #[derive(Debug, Clone)]
 pub struct Redactor {
     pub(super) llm: Option<LlmConfig>,
-    pub(super) person_detection: bool,
+    pub(super) rules: RedactionRules,
 }
 
 #[derive(Debug, Default)]

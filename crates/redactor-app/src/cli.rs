@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use crate::app_config::{DEFAULT_CONFIG_PATH, load};
 use crate::commands;
 use crate::settings::{DEFAULT_SESSION_PASSPHRASE_ENV, LlmMode};
-use crate::support::resolve_llm_args;
+use crate::support::{resolve_llm_args, resolve_redaction_rules};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -42,6 +42,8 @@ enum Command {
         input_kind: InputKindArgs,
         #[command(flatten)]
         llm: LlmArgs,
+        #[command(flatten)]
+        redaction: RedactionRuleArgs,
         #[arg(long)]
         session_out: Option<PathBuf>,
         #[command(flatten)]
@@ -56,6 +58,8 @@ enum Command {
         input_kind: InputKindArgs,
         #[command(flatten)]
         llm: LlmArgs,
+        #[command(flatten)]
+        redaction: RedactionRuleArgs,
     },
     Restore {
         #[command(flatten)]
@@ -89,6 +93,8 @@ enum Command {
         #[arg(long)]
         audit_dir: Option<PathBuf>,
         #[command(flatten)]
+        redaction: RedactionRuleArgs,
+        #[command(flatten)]
         session_passphrase_env: SessionPassphraseEnvArgs,
     },
 }
@@ -118,6 +124,28 @@ pub(crate) struct LlmArgs {
     pub(crate) ollama_url: Option<String>,
     #[arg(long)]
     pub(crate) model: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Args)]
+pub(crate) struct RedactionRuleArgs {
+    #[arg(long = "redact-secret")]
+    pub(crate) secret: Option<bool>,
+    #[arg(long = "redact-domain")]
+    pub(crate) domain: Option<bool>,
+    #[arg(long = "redact-url")]
+    pub(crate) url: Option<bool>,
+    #[arg(long = "redact-email")]
+    pub(crate) email: Option<bool>,
+    #[arg(long = "redact-ip")]
+    pub(crate) ip: Option<bool>,
+    #[arg(long = "redact-cidr")]
+    pub(crate) cidr: Option<bool>,
+    #[arg(long = "redact-phone")]
+    pub(crate) phone: Option<bool>,
+    #[arg(long = "redact-person")]
+    pub(crate) person: Option<bool>,
+    #[arg(long = "redact-organization")]
+    pub(crate) organization: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -165,6 +193,7 @@ pub(crate) fn run() -> Result<()> {
             report,
             input_kind,
             llm,
+            redaction,
             session_out,
             session_passphrase,
         } => commands::redact::run(
@@ -172,6 +201,7 @@ pub(crate) fn run() -> Result<()> {
             report,
             input_kind,
             resolve_llm_args(llm, &app_config.llm),
+            resolve_redaction_rules(redaction, app_config.redaction),
             session_out,
             session_passphrase,
         ),
@@ -180,11 +210,13 @@ pub(crate) fn run() -> Result<()> {
             report,
             input_kind,
             llm,
+            redaction,
         } => commands::detect::run(
             input,
             report,
             input_kind,
             resolve_llm_args(llm, &app_config.llm),
+            resolve_redaction_rules(redaction, app_config.redaction),
         ),
         Command::Restore {
             input,
@@ -211,6 +243,7 @@ pub(crate) fn run() -> Result<()> {
             upstream,
             api_key_env,
             audit_dir,
+            redaction,
             session_passphrase_env,
         } => {
             #[cfg(feature = "proxy")]
@@ -229,6 +262,7 @@ pub(crate) fn run() -> Result<()> {
                         .session_passphrase_env
                         .unwrap_or(proxy_config.session_passphrase_env),
                 )
+                .with_redaction_rules(resolve_redaction_rules(redaction, app_config.redaction))
                 .with_cors_allowed_origins(proxy_config.cors_allowed_origins);
                 if let (Some(cert_path), Some(cert_key_path)) =
                     (proxy_config.tls_cert_path, proxy_config.tls_key_path)
@@ -246,6 +280,7 @@ pub(crate) fn run() -> Result<()> {
                     upstream,
                     api_key_env,
                     audit_dir,
+                    redaction,
                     session_passphrase_env,
                 );
                 Err(anyhow::anyhow!(
@@ -274,6 +309,7 @@ mod tests {
                 report,
                 input_kind,
                 llm,
+                redaction,
                 session_passphrase,
                 ..
             } => {
@@ -282,6 +318,7 @@ mod tests {
                 assert_eq!(llm.llm, None);
                 assert_eq!(llm.ollama_url, None);
                 assert_eq!(llm.model, None);
+                assert_eq!(redaction.domain, None);
                 assert_eq!(
                     session_passphrase.session_passphrase_env,
                     DEFAULT_SESSION_PASSPHRASE_ENV

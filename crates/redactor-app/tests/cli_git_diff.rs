@@ -32,6 +32,8 @@ fn detect_git_diff_skips_file_headers() {
             "detect",
             "--input-kind",
             "git-diff",
+            "--redact-domain",
+            "true",
             "--report",
             "json",
             input.to_str().expect("input path"),

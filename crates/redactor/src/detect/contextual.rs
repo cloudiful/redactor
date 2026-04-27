@@ -1,4 +1,4 @@
-use crate::types::{Finding, FindingKind, FindingSource};
+use crate::types::{Finding, FindingKind, FindingSource, RedactionRules};
 use std::collections::HashSet;
 
 use super::regexes::{assignment_regex, url_regex};
@@ -43,7 +43,7 @@ pub(crate) fn propagate_repeated_secrets(text: &str, findings: &mut Vec<Finding>
 pub(crate) fn detect_contextual_assignments(
     text: &str,
     findings: &mut Vec<Finding>,
-    person_detection: bool,
+    rules: RedactionRules,
 ) {
     let mut offset = 0;
 
@@ -67,8 +67,7 @@ pub(crate) fn detect_contextual_assignments(
             }
 
             let separator = separator_match.as_str().chars().next().unwrap_or('=');
-            let Some(kind) = contextual_kind(key, value, raw_value, separator, person_detection)
-            else {
+            let Some(kind) = contextual_kind(key, value, raw_value, separator, rules) else {
                 continue;
             };
 
@@ -95,45 +94,47 @@ fn contextual_kind(
     value: &str,
     raw_value: &str,
     separator: char,
-    person_detection: bool,
+    rules: RedactionRules,
 ) -> Option<FindingKind> {
     let lower = key.to_ascii_lowercase();
 
-    if lower.contains("secret")
-        || lower.contains("token")
-        || lower.contains("password")
-        || lower.contains("passwd")
-        || lower.contains("api_key")
-        || lower.contains("apikey")
-        || lower.contains("private_key")
+    if rules.secret
+        && (lower.contains("secret")
+            || lower.contains("token")
+            || lower.contains("password")
+            || lower.contains("passwd")
+            || lower.contains("api_key")
+            || lower.contains("apikey")
+            || lower.contains("private_key"))
     {
         return contextual_secret_kind(value, raw_value, separator);
     }
 
-    if lower.contains("email") && is_valid_email(value) {
+    if rules.email && lower.contains("email") && is_valid_email(value) {
         return Some(FindingKind::Email);
     }
 
-    if (lower.contains("domain") || lower.contains("host"))
+    if rules.domain
+        && (lower.contains("domain") || lower.contains("host"))
         && is_plain_config_value(raw_value)
         && is_valid_domain(value)
     {
         return Some(FindingKind::Domain);
     }
 
-    if lower.contains("url") && url_regex().is_match(value) {
+    if rules.url && lower.contains("url") && url_regex().is_match(value) {
         return Some(FindingKind::Url);
     }
 
-    if lower.contains("phone") && is_valid_phone(value) {
+    if rules.phone && lower.contains("phone") && is_valid_phone(value) {
         return Some(FindingKind::Phone);
     }
 
-    if person_detection && lower.contains("name") && value.split_whitespace().count() >= 2 {
+    if rules.person && lower.contains("name") && value.split_whitespace().count() >= 2 {
         return Some(FindingKind::Person);
     }
 
-    looks_like_secret(value).then_some(FindingKind::Secret)
+    (rules.secret && looks_like_secret(value)).then_some(FindingKind::Secret)
 }
 
 fn contextual_secret_kind(value: &str, raw_value: &str, separator: char) -> Option<FindingKind> {

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::detect::normalize;
-use crate::types::{Finding, FindingKind, FindingSource};
+use crate::types::{Finding, FindingKind, FindingSource, RedactionRules};
 
 #[derive(Debug, Clone, Default)]
 pub struct LlmConfig {
@@ -66,13 +66,13 @@ struct Candidate {
 pub fn discover_candidates(
     config: &LlmConfig,
     text: &str,
-    person_detection: bool,
+    rules: RedactionRules,
 ) -> Result<Vec<Finding>> {
-    let allowed_kinds = if person_detection {
-        "person, organization"
-    } else {
-        "organization"
-    };
+    let allowed_kinds = allowed_llm_kinds(rules);
+    if allowed_kinds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let allowed_kinds = allowed_kinds.join(", ");
     let prompt = format!(
         "Find sensitive items in the input text. Return JSON only with a top-level key named candidates. \
          Each candidate must include kind, value, confidence. Allowed kinds: {allowed_kinds}. \
@@ -117,19 +117,30 @@ pub fn discover_candidates(
         .context("Ollama response did not contain any choices")?
         .message
         .content;
-    parse_candidates(text, &content, person_detection)
+    parse_candidates(text, &content, rules)
 }
 
 #[cfg(not(feature = "ollama"))]
 pub fn discover_candidates(
     _config: &LlmConfig,
     _text: &str,
-    _person_detection: bool,
+    _rules: RedactionRules,
 ) -> Result<Vec<Finding>> {
     anyhow::bail!("this binary was built without the `ollama` feature")
 }
 
-fn parse_candidates(text: &str, content: &str, person_detection: bool) -> Result<Vec<Finding>> {
+fn allowed_llm_kinds(rules: RedactionRules) -> Vec<&'static str> {
+    let mut kinds = Vec::new();
+    if rules.person {
+        kinds.push("person");
+    }
+    if rules.organization {
+        kinds.push("organization");
+    }
+    kinds
+}
+
+fn parse_candidates(text: &str, content: &str, rules: RedactionRules) -> Result<Vec<Finding>> {
     let envelope: CandidateEnvelope =
         serde_json::from_str(content).context("failed to parse LLM JSON response")?;
     let mut findings = Vec::new();
@@ -144,7 +155,7 @@ fn parse_candidates(text: &str, content: &str, person_detection: bool) -> Result
     let mut consumed_positions = HashMap::<String, usize>::new();
 
     for candidate in envelope.candidates {
-        let Some(kind) = map_kind(&candidate.kind, person_detection) else {
+        let Some(kind) = map_kind(&candidate.kind, rules) else {
             continue;
         };
         if let Some(start) = find_next_unoccupied_match(
@@ -227,17 +238,17 @@ fn collect_match_positions(text: &str, value: &str) -> Vec<usize> {
     positions
 }
 
-fn map_kind(kind: &str, person_detection: bool) -> Option<FindingKind> {
+fn map_kind(kind: &str, rules: RedactionRules) -> Option<FindingKind> {
     match kind {
-        "person" if person_detection => Some(FindingKind::Person),
-        "organization" => Some(FindingKind::Organization),
+        "person" if rules.person => Some(FindingKind::Person),
+        "organization" if rules.organization => Some(FindingKind::Organization),
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::FindingKind;
+    use crate::{FindingKind, RedactionRules};
 
     use super::parse_candidates;
 
@@ -253,7 +264,12 @@ mod tests {
             ]
         }"#;
 
-        let findings = parse_candidates(text, content, true).expect("parse candidates");
+        let findings = parse_candidates(
+            text,
+            content,
+            RedactionRules::default().with_kind(FindingKind::Person, true),
+        )
+        .expect("parse candidates");
         let spans = findings
             .iter()
             .map(|finding| (finding.match_text.as_str(), finding.start, finding.end))
@@ -281,7 +297,12 @@ mod tests {
             ]
         }"#;
 
-        let findings = parse_candidates(text, content, true).expect("parse candidates");
+        let findings = parse_candidates(
+            text,
+            content,
+            RedactionRules::default().with_kind(FindingKind::Person, true),
+        )
+        .expect("parse candidates");
         let alice_positions = findings
             .iter()
             .map(|finding| (finding.start, finding.end))
@@ -301,7 +322,12 @@ mod tests {
             ]
         }"#;
 
-        let findings = parse_candidates(text, content, true).expect("parse candidates");
+        let findings = parse_candidates(
+            text,
+            content,
+            RedactionRules::default().with_kind(FindingKind::Person, true),
+        )
+        .expect("parse candidates");
         let spans = findings
             .iter()
             .map(|finding| (finding.match_text.as_str(), finding.start, finding.end))
@@ -323,7 +349,8 @@ mod tests {
             ]
         }"#;
 
-        let findings = parse_candidates(text, content, false).expect("parse candidates");
+        let findings =
+            parse_candidates(text, content, RedactionRules::default()).expect("parse candidates");
         let values = findings
             .iter()
             .map(|finding| (finding.kind, finding.match_text.as_str()))

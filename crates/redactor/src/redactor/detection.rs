@@ -72,10 +72,10 @@ pub(super) fn detect_internal(
 }
 
 fn detect_fragment(redactor: &Redactor, text: &str) -> DetectionOutcome {
-    let mut findings = detect_with_rules(text, redactor.person_detection);
+    let mut findings = detect_with_rules(text, redactor.rules);
     let mut stats = DetectionStats::default();
     if let Some(config) = &redactor.llm {
-        match discover_candidates(config, text, redactor.person_detection) {
+        match discover_candidates(config, text, redactor.rules) {
             Ok(mut llm_findings) => {
                 stats.llm_candidates_total += llm_findings.len();
                 findings.append(&mut llm_findings);

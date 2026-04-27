@@ -35,7 +35,7 @@ async fn text_routes_round_trip() {
             Request::post("/redact/text")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"text":"host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC"}"#,
+                    r#"{"text":"host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC","redaction":{"domain":true}}"#,
                 ))
                 .expect("request"),
         )
@@ -87,6 +87,38 @@ async fn text_routes_round_trip() {
         .await
         .expect("inspect response");
     assert_eq!(inspect.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn redact_text_leaves_domains_by_default() {
+    let app = app(ProxyConfig::new(
+        "127.0.0.1:0".to_string(),
+        "https://openrouter.ai/api/v1".to_string(),
+        None,
+        None,
+        "IGNORED".to_string(),
+    )
+    .with_session_passphrase("test-passphrase"))
+    .expect("app");
+
+    let redact = app
+        .oneshot(
+            Request::post("/redact/text")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"text":"host=service.example.com"}"#))
+                .expect("request"),
+        )
+        .await
+        .expect("redact response");
+    assert_eq!(redact.status(), StatusCode::OK);
+
+    let redact_body = to_bytes(redact.into_body(), usize::MAX)
+        .await
+        .expect("redact body");
+    let redact_json: TestRedactResponse =
+        serde_json::from_slice(&redact_body).expect("redact json");
+    assert!(redact_json.redacted_text.contains("service.example.com"));
+    assert!(!redact_json.redacted_text.contains("__R_DOMAIN_"));
 }
 
 #[tokio::test]

@@ -160,12 +160,18 @@ pub fn restore_json_response(
 
 #[cfg(test)]
 mod tests {
-    use redactor::RedactorBuilder;
+    use redactor::{FindingKind, RedactionRules, Redactor, RedactorBuilder};
     use serde_json::json;
 
     use crate::stream::SseRestoreBuffer;
 
     use super::{ApiEndpoint, redact_json_request, restore_json_response};
+
+    fn domain_redactor() -> Redactor {
+        RedactorBuilder::new()
+            .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+            .build()
+    }
 
     #[test]
     fn redacts_chat_request_text_fields() {
@@ -176,7 +182,7 @@ mod tests {
                 { "role": "assistant", "content": [ { "type": "text", "text": "mirror service.example.com" } ] }
             ]
         });
-        let redactor = RedactorBuilder::new().build();
+        let redactor = domain_redactor();
         let result = redact_json_request(ApiEndpoint::ChatCompletions, body, &redactor)
             .expect("redact chat request");
 
@@ -192,7 +198,7 @@ mod tests {
             "model": "openrouter/test",
             "messages": [{ "role": "user", "content": "service.example.com" }]
         });
-        let redactor = RedactorBuilder::new().build();
+        let redactor = domain_redactor();
         let redacted =
             redact_json_request(ApiEndpoint::ChatCompletions, body, &redactor).expect("redact");
         let token = redacted
@@ -231,7 +237,7 @@ mod tests {
                 }
             ]
         });
-        let redactor = RedactorBuilder::new().build();
+        let redactor = domain_redactor();
         let result = redact_json_request(ApiEndpoint::Responses, body, &redactor)
             .expect("redact responses request");
 
@@ -243,7 +249,7 @@ mod tests {
 
     #[test]
     fn sse_restore_buffer_handles_split_tokens() {
-        let redactor = RedactorBuilder::new().build();
+        let redactor = domain_redactor();
         let session = redactor
             .redact_with_session("domain=service.example.com")
             .expect("session");

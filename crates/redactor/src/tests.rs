@@ -1,4 +1,13 @@
-use crate::{InputKind, RedactorBuilder, decrypt_session_from_str, encrypt_session_to_string};
+use crate::{
+    FindingKind, InputKind, RedactionRules, Redactor, RedactorBuilder, decrypt_session_from_str,
+    encrypt_session_to_string,
+};
+
+fn domain_redactor() -> Redactor {
+    RedactorBuilder::new()
+        .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+        .build()
+}
 
 const SAMPLE: &str = r#"  nctalk:
     image: registry.example.com/ghcr/example-releases/aio-talk
@@ -24,10 +33,7 @@ const SAMPLE: &str = r#"  nctalk:
 
 #[test]
 fn redacts_sample_with_structured_tokens() {
-    let result = RedactorBuilder::new()
-        .build()
-        .redact(SAMPLE)
-        .expect("redact sample");
+    let result = domain_redactor().redact(SAMPLE).expect("redact sample");
 
     assert!(result.redacted_text.contains("__R_DOMAIN_001__"));
     assert!(result.redacted_text.contains("__R_DOMAIN_002__"));
@@ -41,7 +47,7 @@ fn redacts_sample_with_structured_tokens() {
 
 #[test]
 fn session_round_trip_restores_original_text() {
-    let redactor = RedactorBuilder::new().build();
+    let redactor = domain_redactor();
     let session = redactor.redact_with_session(SAMPLE).expect("session");
     let restored = redactor.restore_text(&session.redacted_text, &session);
 
@@ -52,7 +58,7 @@ fn session_round_trip_restores_original_text() {
 
 #[test]
 fn restore_patch_keeps_copied_tokens_restorable() {
-    let redactor = RedactorBuilder::new().build();
+    let redactor = domain_redactor();
     let session = redactor.redact_with_session(SAMPLE).expect("session");
     let domain_token = session
         .entries
@@ -73,7 +79,7 @@ fn restore_patch_keeps_copied_tokens_restorable() {
 
 #[test]
 fn altered_token_fails_strict_restore() {
-    let redactor = RedactorBuilder::new().build();
+    let redactor = domain_redactor();
     let session = redactor.redact_with_session(SAMPLE).expect("session");
     let edited = session
         .redacted_text
@@ -87,7 +93,7 @@ fn altered_token_fails_strict_restore() {
 
 #[test]
 fn encrypted_session_round_trip_restores_session() {
-    let redactor = RedactorBuilder::new().build();
+    let redactor = domain_redactor();
     let session = redactor.redact_with_session(SAMPLE).expect("session");
     let encrypted = encrypt_session_to_string(&session, "passphrase").expect("encrypt");
     let decrypted = decrypt_session_from_str(&encrypted, "passphrase").expect("decrypt");
@@ -126,6 +132,33 @@ fn person_detection_can_be_enabled_explicitly() {
 }
 
 #[test]
+fn domain_detection_is_disabled_by_default() {
+    let findings = RedactorBuilder::new()
+        .build()
+        .detect("host=service.example.com")
+        .expect("detect");
+
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.kind != FindingKind::Domain)
+    );
+}
+
+#[test]
+fn domain_detection_can_be_enabled_explicitly() {
+    let findings = domain_redactor()
+        .detect("host=service.example.com")
+        .expect("detect");
+
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.kind == FindingKind::Domain)
+    );
+}
+
+#[test]
 fn git_diff_mode_redacts_hunk_lines_without_touching_headers() {
     let diff = concat!(
         "diff --git a/config.yml b/config.yml\n",
@@ -137,8 +170,7 @@ fn git_diff_mode_redacts_hunk_lines_without_touching_headers() {
         "+API_URL=https://api.example.com/v2\n",
         "+API_TOKEN=sk_live_1234567890ABCDEFghij\n",
     );
-    let result = RedactorBuilder::new()
-        .build()
+    let result = domain_redactor()
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
@@ -169,8 +201,7 @@ fn git_diff_mode_skips_file_name_false_positives() {
         "-host=internal.example.com\n",
         "+host=prod.internal.example.com\n",
     );
-    let findings = RedactorBuilder::new()
-        .build()
+    let findings = domain_redactor()
         .detect_with_input_kind(diff, InputKind::GitDiff)
         .expect("detect diff");
 
@@ -202,8 +233,7 @@ fn git_diff_mode_skips_code_like_secret_assignments() {
         "+    secret_redaction_preview: format_redaction_preview(&redacted_diff.entries),\n",
         "+    secret_redactions: redacted_diff.replacement_occurrences,\n",
     );
-    let result = RedactorBuilder::new()
-        .build()
+    let result = domain_redactor()
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
@@ -235,8 +265,7 @@ fn git_diff_mode_skips_code_like_domains() {
         "+    let x = artifact.result.stats;\n",
         "+    for entry in entries.iter() {\n",
     );
-    let result = RedactorBuilder::new()
-        .build()
+    let result = domain_redactor()
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
@@ -264,8 +293,7 @@ fn git_diff_mode_keeps_redacting_real_config_values() {
         "+API_URL=https://api.example.com/v2\n",
         "+host=prod.internal.example.com\n",
     );
-    let result = RedactorBuilder::new()
-        .build()
+    let result = domain_redactor()
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
@@ -284,8 +312,7 @@ fn git_diff_mode_redacts_domains_with_psl_suffixes_outside_old_allowlist() {
         "+public_host=demo.example.tech\n",
         "+edge_host=service.example.co.uk\n",
     );
-    let result = RedactorBuilder::new()
-        .build()
+    let result = domain_redactor()
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use config::{ConfigSource, read};
+use redactor::RedactionRules;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,7 @@ pub(crate) const DEFAULT_CONFIG_PATH: &str = "redactor.toml";
 #[serde(default)]
 pub(crate) struct AppConfig {
     pub(crate) llm: LlmSettings,
+    pub(crate) redaction: RedactionRules,
     pub(crate) proxy: ProxySettings,
 }
 
@@ -22,6 +24,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             llm: LlmSettings::default(),
+            redaction: RedactionRules::default(),
             proxy: ProxySettings::default(),
         }
     }

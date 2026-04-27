@@ -23,8 +23,8 @@ pub use session::{
 use thiserror::Error;
 pub use types::{
     AppliedReplacement, Finding, FindingKind, FindingSource, RedactionArtifact, RedactionResult,
-    RedactionSession, RedactionStats, ReplacementStrategy, RestorationEntry, RestoreResult,
-    SessionEntrySummary, SessionSummary,
+    RedactionRules, RedactionSession, RedactionStats, ReplacementStrategy, RestorationEntry,
+    RestoreResult, SessionEntrySummary, SessionSummary,
 };
 
 #[derive(Debug, Error)]

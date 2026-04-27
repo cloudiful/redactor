@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use redactor::{LlmConfig, Redactor, RedactorBuilder};
+use redactor::{LlmConfig, RedactionRules, Redactor, RedactorBuilder};
 use std::env;
 
 use crate::app_config::LlmSettings;
@@ -13,6 +13,23 @@ pub(crate) struct ResolvedLlmArgs {
     pub(crate) model: String,
 }
 
+pub(crate) fn resolve_redaction_rules(
+    overrides: crate::cli::RedactionRuleArgs,
+    defaults: RedactionRules,
+) -> RedactionRules {
+    RedactionRules {
+        secret: overrides.secret.unwrap_or(defaults.secret),
+        domain: overrides.domain.unwrap_or(defaults.domain),
+        url: overrides.url.unwrap_or(defaults.url),
+        email: overrides.email.unwrap_or(defaults.email),
+        ip: overrides.ip.unwrap_or(defaults.ip),
+        cidr: overrides.cidr.unwrap_or(defaults.cidr),
+        phone: overrides.phone.unwrap_or(defaults.phone),
+        person: overrides.person.unwrap_or(defaults.person),
+        organization: overrides.organization.unwrap_or(defaults.organization),
+    }
+}
+
 pub(crate) fn resolve_llm_args(llm: LlmArgs, defaults: &LlmSettings) -> ResolvedLlmArgs {
     ResolvedLlmArgs {
         llm: llm.llm.unwrap_or(defaults.mode),
@@ -23,8 +40,8 @@ pub(crate) fn resolve_llm_args(llm: LlmArgs, defaults: &LlmSettings) -> Resolved
     }
 }
 
-pub(crate) fn build_redactor(llm: ResolvedLlmArgs) -> Redactor {
-    let builder = RedactorBuilder::new();
+pub(crate) fn build_redactor(llm: ResolvedLlmArgs, rules: RedactionRules) -> Redactor {
+    let builder = RedactorBuilder::new().with_redaction_rules(rules);
     match llm.llm {
         LlmMode::Off => builder.build(),
         LlmMode::Ollama => builder

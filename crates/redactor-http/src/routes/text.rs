@@ -37,7 +37,9 @@ async fn redact_text_inner(
     request: RedactTextRequest,
 ) -> Result<Response<Body>> {
     let passphrase = resolve_service_passphrase(&state)?;
-    let redactor = RedactorBuilder::new().build();
+    let redactor = RedactorBuilder::new()
+        .with_redaction_rules(request.redaction.unwrap_or(state.redaction_rules))
+        .build();
     let secured = redact_text_with_encrypted_session(
         &redactor,
         &request.text,
@@ -77,7 +79,9 @@ async fn restore_text_inner(
     request: RestoreTextRequest,
 ) -> Result<Response<Body>> {
     let passphrase = resolve_service_passphrase(&state)?;
-    let redactor = RedactorBuilder::new().build();
+    let redactor = RedactorBuilder::new()
+        .with_redaction_rules(state.redaction_rules)
+        .build();
     let restored = restore_text_from_encrypted_session(
         &redactor,
         &request.text,

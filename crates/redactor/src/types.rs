@@ -15,6 +15,71 @@ pub enum FindingKind {
     Organization,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RedactionRules {
+    pub secret: bool,
+    pub domain: bool,
+    pub url: bool,
+    pub email: bool,
+    pub ip: bool,
+    pub cidr: bool,
+    pub phone: bool,
+    pub person: bool,
+    pub organization: bool,
+}
+
+impl Default for RedactionRules {
+    fn default() -> Self {
+        Self {
+            secret: true,
+            domain: false,
+            url: true,
+            email: true,
+            ip: true,
+            cidr: true,
+            phone: true,
+            person: false,
+            organization: true,
+        }
+    }
+}
+
+impl RedactionRules {
+    pub fn with_kind(mut self, kind: FindingKind, enabled: bool) -> Self {
+        self.set_kind(kind, enabled);
+        self
+    }
+
+    pub fn set_kind(&mut self, kind: FindingKind, enabled: bool) {
+        match kind {
+            FindingKind::Secret => self.secret = enabled,
+            FindingKind::Domain => self.domain = enabled,
+            FindingKind::Url => self.url = enabled,
+            FindingKind::Email => self.email = enabled,
+            FindingKind::Ip => self.ip = enabled,
+            FindingKind::Cidr => self.cidr = enabled,
+            FindingKind::Phone => self.phone = enabled,
+            FindingKind::Person => self.person = enabled,
+            FindingKind::Organization => self.organization = enabled,
+        }
+    }
+
+    pub fn is_enabled(self, kind: FindingKind) -> bool {
+        match kind {
+            FindingKind::Secret => self.secret,
+            FindingKind::Domain => self.domain,
+            FindingKind::Url => self.url,
+            FindingKind::Email => self.email,
+            FindingKind::Ip => self.ip,
+            FindingKind::Cidr => self.cidr,
+            FindingKind::Phone => self.phone,
+            FindingKind::Person => self.person,
+            FindingKind::Organization => self.organization,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FindingKindMeta {
     label: &'static str,

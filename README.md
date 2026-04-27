@@ -18,16 +18,21 @@ cargo add cloudiful-redactor
 Minimal usage:
 
 ```rust
-use cloudiful_redactor::RedactorBuilder;
+use cloudiful_redactor::{FindingKind, RedactionRules, RedactorBuilder};
 
 fn main() -> anyhow::Result<()> {
-    let redactor = RedactorBuilder::new().build();
+    let redactor = RedactorBuilder::new()
+        .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+        .build();
     let result = redactor.redact("host=service.example.com secret=sk_live_1234567890ABCDEFghij")?;
 
     println!("{}", result.redacted_text);
     Ok(())
 }
 ```
+
+Domain and person detection are disabled by default. Use `RedactionRules` or config keys under
+`[redaction]` to enable only the finding kinds the caller needs.
 
 For reversible redaction, use the session-based APIs:
 

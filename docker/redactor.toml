@@ -3,6 +3,17 @@ mode = "off"
 ollama_url = "http://localhost:11434"
 model = "gemma4:e2b"
 
+[redaction]
+secret = true
+domain = false
+url = true
+email = true
+ip = true
+cidr = true
+phone = true
+person = false
+organization = true
+
 [proxy]
 listen = "0.0.0.0:8787"
 upstream = "https://openrouter.ai/api/v1"

@@ -103,6 +103,8 @@ components:
         input_kind:
           $ref: "#/components/schemas/InputKind"
           default: text
+        redaction:
+          $ref: "#/components/schemas/RedactionRules"
       required: [text]
     RestoreTextRequest:
       type: object
@@ -208,3 +210,34 @@ components:
     InputKind:
       type: string
       enum: [text, git_diff]
+    RedactionRules:
+      type: object
+      additionalProperties: false
+      properties:
+        secret:
+          type: boolean
+          default: true
+        domain:
+          type: boolean
+          default: false
+        url:
+          type: boolean
+          default: true
+        email:
+          type: boolean
+          default: true
+        ip:
+          type: boolean
+          default: true
+        cidr:
+          type: boolean
+          default: true
+        phone:
+          type: boolean
+          default: true
+        person:
+          type: boolean
+          default: false
+        organization:
+          type: boolean
+          default: true
