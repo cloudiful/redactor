@@ -71,6 +71,8 @@ fn redact_git_diff_preserves_patch_shape_and_reports_stats() {
             "redact",
             "--input-kind",
             "git-diff",
+            "--redact-secret",
+            "true",
             "--report",
             "json",
             input.to_str().expect("input path"),

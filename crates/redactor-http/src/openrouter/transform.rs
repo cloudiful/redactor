@@ -160,7 +160,7 @@ pub fn restore_json_response(
 
 #[cfg(test)]
 mod tests {
-    use redactor::{FindingKind, RedactionRules, Redactor, RedactorBuilder};
+    use redactor::{FindingKind, RedactionPolicy, Redactor, RedactorBuilder};
     use serde_json::json;
 
     use crate::stream::SseRestoreBuffer;
@@ -169,7 +169,12 @@ mod tests {
 
     fn domain_redactor() -> Redactor {
         RedactorBuilder::new()
-            .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+            .with_redaction_policy(
+                RedactionPolicy::default()
+                    .with_kind(FindingKind::Domain, true)
+                    .with_kind(FindingKind::Secret, true)
+                    .with_kind(FindingKind::Url, true),
+            )
             .build()
     }
 

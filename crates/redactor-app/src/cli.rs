@@ -2,7 +2,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use redactor::InputKind;
+use redactor::{CustomFileRule, CustomStringRule, InputKind};
 #[cfg(feature = "proxy")]
 use redactor_http::ProxyConfig;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use crate::app_config::{DEFAULT_CONFIG_PATH, load};
 use crate::commands;
 use crate::settings::{DEFAULT_SESSION_PASSPHRASE_ENV, LlmMode};
-use crate::support::{resolve_llm_args, resolve_redaction_rules};
+use crate::support::{resolve_llm_args, resolve_redaction_policy};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -45,6 +45,22 @@ enum Command {
         #[command(flatten)]
         redaction: RedactionRuleArgs,
         #[arg(long)]
+        custom_string: Vec<String>,
+        #[arg(long)]
+        custom_string_contains: Vec<String>,
+        #[arg(long)]
+        custom_string_regex: Vec<String>,
+        #[arg(long)]
+        custom_string_line: Vec<String>,
+        #[arg(long)]
+        custom_string_contains_line: Vec<String>,
+        #[arg(long)]
+        custom_string_regex_line: Vec<String>,
+        #[arg(long)]
+        custom_file: Vec<String>,
+        #[arg(long)]
+        source_path: Option<String>,
+        #[arg(long)]
         session_out: Option<PathBuf>,
         #[command(flatten)]
         session_passphrase: SessionPassphraseArgs,
@@ -60,6 +76,22 @@ enum Command {
         llm: LlmArgs,
         #[command(flatten)]
         redaction: RedactionRuleArgs,
+        #[arg(long)]
+        custom_string: Vec<String>,
+        #[arg(long)]
+        custom_string_contains: Vec<String>,
+        #[arg(long)]
+        custom_string_regex: Vec<String>,
+        #[arg(long)]
+        custom_string_line: Vec<String>,
+        #[arg(long)]
+        custom_string_contains_line: Vec<String>,
+        #[arg(long)]
+        custom_string_regex_line: Vec<String>,
+        #[arg(long)]
+        custom_file: Vec<String>,
+        #[arg(long)]
+        source_path: Option<String>,
     },
     Restore {
         #[command(flatten)]
@@ -126,7 +158,7 @@ pub(crate) struct LlmArgs {
     pub(crate) model: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Args)]
+#[derive(Debug, Clone, Args)]
 pub(crate) struct RedactionRuleArgs {
     #[arg(long = "redact-secret")]
     pub(crate) secret: Option<bool>,
@@ -174,6 +206,82 @@ pub(crate) struct SessionPassphraseEnvArgs {
     pub(crate) session_passphrase_env: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CustomArgs {
+    custom_strings: Vec<CustomStringRule>,
+    custom_files: Vec<CustomFileRule>,
+    source_path: Option<String>,
+}
+
+impl From<&RedactCommandParts> for CustomArgs {
+    fn from(parts: &RedactCommandParts) -> Self {
+        let mut custom_strings = Vec::new();
+        for pattern in &parts.custom_string {
+            custom_strings.push(CustomStringRule {
+                pattern: pattern.clone(),
+                match_type: redactor::CustomStringMatch::Exact,
+                scope: redactor::CustomStringScope::Text,
+            });
+        }
+        for pattern in &parts.custom_string_contains {
+            custom_strings.push(CustomStringRule {
+                pattern: pattern.clone(),
+                match_type: redactor::CustomStringMatch::Contains,
+                scope: redactor::CustomStringScope::Text,
+            });
+        }
+        for pattern in &parts.custom_string_regex {
+            custom_strings.push(CustomStringRule {
+                pattern: pattern.clone(),
+                match_type: redactor::CustomStringMatch::Regex,
+                scope: redactor::CustomStringScope::Text,
+            });
+        }
+        for pattern in &parts.custom_string_line {
+            custom_strings.push(CustomStringRule {
+                pattern: pattern.clone(),
+                match_type: redactor::CustomStringMatch::Exact,
+                scope: redactor::CustomStringScope::Line,
+            });
+        }
+        for pattern in &parts.custom_string_contains_line {
+            custom_strings.push(CustomStringRule {
+                pattern: pattern.clone(),
+                match_type: redactor::CustomStringMatch::Contains,
+                scope: redactor::CustomStringScope::Line,
+            });
+        }
+        for pattern in &parts.custom_string_regex_line {
+            custom_strings.push(CustomStringRule {
+                pattern: pattern.clone(),
+                match_type: redactor::CustomStringMatch::Regex,
+                scope: redactor::CustomStringScope::Line,
+            });
+        }
+        let custom_files = parts
+            .custom_file
+            .iter()
+            .map(|p| CustomFileRule { path: p.clone() })
+            .collect();
+        CustomArgs {
+            custom_strings,
+            custom_files,
+            source_path: parts.source_path.clone(),
+        }
+    }
+}
+
+struct RedactCommandParts {
+    custom_string: Vec<String>,
+    custom_string_contains: Vec<String>,
+    custom_string_regex: Vec<String>,
+    custom_string_line: Vec<String>,
+    custom_string_contains_line: Vec<String>,
+    custom_string_regex_line: Vec<String>,
+    custom_file: Vec<String>,
+    source_path: Option<String>,
+}
+
 impl From<InputKindArg> for InputKind {
     fn from(value: InputKindArg) -> Self {
         match value {
@@ -194,30 +302,82 @@ pub(crate) fn run() -> Result<()> {
             input_kind,
             llm,
             redaction,
+            custom_string,
+            custom_string_contains,
+            custom_string_regex,
+            custom_string_line,
+            custom_string_contains_line,
+            custom_string_regex_line,
+            custom_file,
+            source_path,
             session_out,
             session_passphrase,
-        } => commands::redact::run(
-            input,
-            report,
-            input_kind,
-            resolve_llm_args(llm, &app_config.llm),
-            resolve_redaction_rules(redaction, app_config.redaction),
-            session_out,
-            session_passphrase,
-        ),
+        } => {
+            let parts = RedactCommandParts {
+                custom_string,
+                custom_string_contains,
+                custom_string_regex,
+                custom_string_line,
+                custom_string_contains_line,
+                custom_string_regex_line,
+                custom_file,
+                source_path,
+            };
+            let custom = CustomArgs::from(&parts);
+            let policy = resolve_redaction_policy(redaction, app_config.redaction)
+                .with_custom_strings(custom.custom_strings)
+                .with_custom_files(custom.custom_files);
+            policy.validate().map_err(|e| anyhow::anyhow!(e))?;
+            commands::redact::run(
+                input,
+                report,
+                input_kind,
+                resolve_llm_args(llm, &app_config.llm),
+                policy,
+                custom.source_path,
+                session_out,
+                session_passphrase,
+            )
+        }
         Command::Detect {
             input,
             report,
             input_kind,
             llm,
             redaction,
-        } => commands::detect::run(
-            input,
-            report,
-            input_kind,
-            resolve_llm_args(llm, &app_config.llm),
-            resolve_redaction_rules(redaction, app_config.redaction),
-        ),
+            custom_string,
+            custom_string_contains,
+            custom_string_regex,
+            custom_string_line,
+            custom_string_contains_line,
+            custom_string_regex_line,
+            custom_file,
+            source_path,
+        } => {
+            let parts = RedactCommandParts {
+                custom_string,
+                custom_string_contains,
+                custom_string_regex,
+                custom_string_line,
+                custom_string_contains_line,
+                custom_string_regex_line,
+                custom_file,
+                source_path,
+            };
+            let custom = CustomArgs::from(&parts);
+            let policy = resolve_redaction_policy(redaction, app_config.redaction)
+                .with_custom_strings(custom.custom_strings)
+                .with_custom_files(custom.custom_files);
+            policy.validate().map_err(|e| anyhow::anyhow!(e))?;
+            commands::detect::run(
+                input,
+                report,
+                input_kind,
+                resolve_llm_args(llm, &app_config.llm),
+                policy,
+                custom.source_path,
+            )
+        }
         Command::Restore {
             input,
             session,
@@ -262,7 +422,7 @@ pub(crate) fn run() -> Result<()> {
                         .session_passphrase_env
                         .unwrap_or(proxy_config.session_passphrase_env),
                 )
-                .with_redaction_rules(resolve_redaction_rules(redaction, app_config.redaction))
+                .with_redaction_policy(resolve_redaction_policy(redaction, app_config.redaction))
                 .with_cors_allowed_origins(proxy_config.cors_allowed_origins);
                 if let (Some(cert_path), Some(cert_key_path)) =
                     (proxy_config.tls_cert_path, proxy_config.tls_key_path)
@@ -293,10 +453,7 @@ pub(crate) fn run() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Cli, Command, DEFAULT_CONFIG_PATH, DEFAULT_SESSION_PASSPHRASE_ENV, InputKindArg,
-        ReportFormat,
-    };
+    use super::{Cli, Command, DEFAULT_CONFIG_PATH, DEFAULT_SESSION_PASSPHRASE_ENV, InputKindArg, ReportFormat};
     use clap::{CommandFactory, Parser};
     use std::path::PathBuf;
 

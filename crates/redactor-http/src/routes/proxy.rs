@@ -54,7 +54,7 @@ async fn proxy_request_inner(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let redactor = RedactorBuilder::new()
-        .with_redaction_rules(state.redaction_rules)
+        .with_redaction_policy(state.redaction_policy.clone())
         .build();
     let redacted = redact_json_request(endpoint, body_json, &redactor)?;
 

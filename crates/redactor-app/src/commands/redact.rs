@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use redactor::{
-    InputKind, RedactionRules, redact_text_artifact, redact_text_with_encrypted_session,
+    InputKind, RedactionPolicy, redact_text_artifact, redact_text_with_encrypted_session,
 };
 
 use crate::cli::{InputArgs, InputKindArgs, ReportArgs, SessionPassphraseArgs};
@@ -16,18 +16,30 @@ pub(crate) fn run(
     report: ReportArgs,
     input_kind: InputKindArgs,
     llm: ResolvedLlmArgs,
-    rules: RedactionRules,
+    policy: RedactionPolicy,
+    source_path: Option<String>,
     session_out: Option<PathBuf>,
     session_passphrase: SessionPassphraseArgs,
 ) -> Result<()> {
     let text = read_input(input.input)?;
-    let redactor = build_redactor(llm, rules);
+    let redactor = build_redactor(llm, policy);
     let input_kind = InputKind::from(input_kind.input_kind);
 
     if let Some(path) = session_out {
         let passphrase = resolve_session_passphrase(session_passphrase)?;
-        let secured = redact_text_with_encrypted_session(&redactor, &text, input_kind, &passphrase)
-            .context("failed to redact input")?;
+        let secured = if let Some(ref source) = source_path {
+            redactor::redact_text_with_encrypted_session_and_source(
+                &redactor,
+                &text,
+                input_kind,
+                source,
+                &passphrase,
+            )
+            .context("failed to redact input")?
+        } else {
+            redact_text_with_encrypted_session(&redactor, &text, input_kind, &passphrase)
+                .context("failed to redact input")?
+        };
         fs::write(&path, &secured.encrypted_session)
             .with_context(|| format!("failed to write session file {}", path.display()))?;
         print_report(
@@ -40,8 +52,12 @@ pub(crate) fn run(
             &secured.artifact.session.redacted_text,
         )
     } else {
-        let artifact =
-            redact_text_artifact(&redactor, &text, input_kind).context("failed to redact input")?;
+        let artifact = if let Some(ref source) = source_path {
+            redactor::redact_text_artifact_with_source(&redactor, &text, input_kind, source)
+                .context("failed to redact input")?
+        } else {
+            redact_text_artifact(&redactor, &text, input_kind).context("failed to redact input")?
+        };
         print_report(
             report.report,
             &SanitizedRedactionOutput {

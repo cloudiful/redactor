@@ -1,7 +1,5 @@
-use crate::detect::{detect_with_rules, select_non_overlapping};
 use crate::input::redactable_ranges;
-use crate::llm::discover_candidates;
-use crate::{Finding, InputKind, RedactorError};
+use crate::types::Finding;
 
 use super::Redactor;
 
@@ -22,60 +20,26 @@ pub(super) struct DetectionOutcome {
 pub(super) fn detect_internal(
     redactor: &Redactor,
     text: &str,
-    input_kind: InputKind,
-) -> Result<DetectionOutcome, RedactorError> {
-    let ranges = redactable_ranges(text, input_kind);
+    input_kind: crate::InputKind,
+    source_path: Option<&str>,
+) -> DetectionOutcome {
+    let ranges = redactable_ranges(text, input_kind, source_path);
     if ranges.is_empty() {
-        return Ok(DetectionOutcome {
+        return DetectionOutcome {
             findings: Vec::new(),
             stats: DetectionStats::default(),
-        });
-    }
-    if ranges.len() == 1 && ranges[0].start == 0 && ranges[0].end == text.len() {
-        return Ok(detect_fragment(redactor, text));
+        };
     }
 
-    let mut findings = Vec::new();
-    let mut stats = DetectionStats::default();
-    let mut has_cross_fragment_overlap = false;
+    let result = crate::detect::detect_with_policy(text, &redactor.policy, &ranges);
+    let mut findings = result.findings;
+    let mut stats = DetectionStats {
+        dropped_findings: result.dropped_findings,
+        ..DetectionStats::default()
+    };
 
-    for range in ranges {
-        let fragment = &text[range.clone()];
-        let fragment_outcome = detect_fragment(redactor, fragment);
-        let offset = range.start;
-        findings.extend(fragment_outcome.findings.into_iter().map(|mut finding| {
-            finding.start += offset;
-            finding.end += offset;
-            finding
-        }));
-        if let (Some(previous), Some(current)) = (
-            findings.get(findings.len().saturating_sub(2)),
-            findings.last(),
-        ) {
-            has_cross_fragment_overlap |= previous.end > current.start;
-        }
-        stats.dropped_findings += fragment_outcome.stats.dropped_findings;
-        stats.llm_candidates_total += fragment_outcome.stats.llm_candidates_total;
-        stats.llm_request_failed |= fragment_outcome.stats.llm_request_failed;
-        if stats.llm_error.is_none() {
-            stats.llm_error = fragment_outcome.stats.llm_error;
-        }
-    }
-
-    if has_cross_fragment_overlap {
-        let (findings, dropped) = select_non_overlapping(findings);
-        stats.dropped_findings += dropped;
-        Ok(DetectionOutcome { findings, stats })
-    } else {
-        Ok(DetectionOutcome { findings, stats })
-    }
-}
-
-fn detect_fragment(redactor: &Redactor, text: &str) -> DetectionOutcome {
-    let mut findings = detect_with_rules(text, redactor.rules);
-    let mut stats = DetectionStats::default();
     if let Some(config) = &redactor.llm {
-        match discover_candidates(config, text, redactor.rules) {
+        match crate::llm::discover_candidates(config, text, redactor.policy.rules) {
             Ok(mut llm_findings) => {
                 stats.llm_candidates_total += llm_findings.len();
                 findings.append(&mut llm_findings);
@@ -85,10 +49,10 @@ fn detect_fragment(redactor: &Redactor, text: &str) -> DetectionOutcome {
                 stats.llm_error = Some(error.to_string());
             }
         }
+        let (merged, dropped) = crate::detect::select_non_overlapping(findings);
+        stats.dropped_findings += dropped;
+        findings = merged;
     }
-
-    let (findings, dropped) = select_non_overlapping(findings);
-    stats.dropped_findings = dropped;
 
     DetectionOutcome { findings, stats }
 }

@@ -7,7 +7,7 @@ use axum::extract::State;
 use axum::http::{Response, StatusCode};
 use redactor::{
     RedactorBuilder, inspect_encrypted_session, redact_text_with_encrypted_session,
-    restore_text_from_encrypted_session,
+    redact_text_with_encrypted_session_and_source, restore_text_from_encrypted_session,
 };
 
 use crate::audit::{maybe_write_audit, resolve_service_passphrase};
@@ -37,16 +37,33 @@ async fn redact_text_inner(
     request: RedactTextRequest,
 ) -> Result<Response<Body>> {
     let passphrase = resolve_service_passphrase(&state)?;
+    let policy = request.redaction.unwrap_or_else(|| state.redaction_policy.clone());
+    if let Err(e) = policy.validate() {
+        return Ok(error_response(StatusCode::BAD_REQUEST, e, "invalid_redaction_policy"));
+    }
+
     let redactor = RedactorBuilder::new()
-        .with_redaction_rules(request.redaction.unwrap_or(state.redaction_rules))
+        .with_redaction_policy(policy)
         .build();
-    let secured = redact_text_with_encrypted_session(
-        &redactor,
-        &request.text,
-        request.input_kind,
-        passphrase,
-    )
-    .context("failed to redact text request")?;
+
+    let secured = if let Some(ref source_path) = request.source_path {
+        redact_text_with_encrypted_session_and_source(
+            &redactor,
+            &request.text,
+            request.input_kind,
+            source_path,
+            passphrase,
+        )
+        .context("failed to redact text request")?
+    } else {
+        redact_text_with_encrypted_session(
+            &redactor,
+            &request.text,
+            request.input_kind,
+            passphrase,
+        )
+        .context("failed to redact text request")?
+    };
 
     maybe_write_audit(&state, &secured.artifact.session)?;
 
@@ -79,9 +96,7 @@ async fn restore_text_inner(
     request: RestoreTextRequest,
 ) -> Result<Response<Body>> {
     let passphrase = resolve_service_passphrase(&state)?;
-    let redactor = RedactorBuilder::new()
-        .with_redaction_rules(state.redaction_rules)
-        .build();
+    let redactor = RedactorBuilder::new().build();
     let restored = restore_text_from_encrypted_session(
         &redactor,
         &request.text,

@@ -13,6 +13,8 @@ pub enum FindingKind {
     Phone,
     Person,
     Organization,
+    CustomString,
+    CustomFile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,15 +34,15 @@ pub struct RedactionRules {
 impl Default for RedactionRules {
     fn default() -> Self {
         Self {
-            secret: true,
+            secret: false,
             domain: false,
-            url: true,
+            url: false,
             email: true,
             ip: true,
             cidr: true,
-            phone: true,
+            phone: false,
             person: false,
-            organization: true,
+            organization: false,
         }
     }
 }
@@ -62,6 +64,7 @@ impl RedactionRules {
             FindingKind::Phone => self.phone = enabled,
             FindingKind::Person => self.person = enabled,
             FindingKind::Organization => self.organization = enabled,
+            FindingKind::CustomString | FindingKind::CustomFile => {}
         }
     }
 
@@ -76,6 +79,131 @@ impl RedactionRules {
             FindingKind::Phone => self.phone,
             FindingKind::Person => self.person,
             FindingKind::Organization => self.organization,
+            FindingKind::CustomString | FindingKind::CustomFile => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomStringMatch {
+    Exact,
+    Contains,
+    Regex,
+}
+
+impl Default for CustomStringMatch {
+    fn default() -> Self {
+        Self::Exact
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomStringScope {
+    Text,
+    Line,
+}
+
+impl Default for CustomStringScope {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomStringRule {
+    pub pattern: String,
+    #[serde(default)]
+    pub match_type: CustomStringMatch,
+    #[serde(default)]
+    pub scope: CustomStringScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomFileRule {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedactionPolicy {
+    #[serde(flatten)]
+    pub rules: RedactionRules,
+    #[serde(default)]
+    pub custom_strings: Vec<CustomStringRule>,
+    #[serde(default)]
+    pub custom_files: Vec<CustomFileRule>,
+}
+
+impl Default for RedactionPolicy {
+    fn default() -> Self {
+        Self {
+            rules: RedactionRules::default(),
+            custom_strings: Vec::new(),
+            custom_files: Vec::new(),
+        }
+    }
+}
+
+impl RedactionPolicy {
+    pub fn with_kind(mut self, kind: FindingKind, enabled: bool) -> Self {
+        self.rules.set_kind(kind, enabled);
+        self
+    }
+
+    pub fn with_custom_string(mut self, rule: CustomStringRule) -> Self {
+        self.custom_strings.push(rule);
+        self
+    }
+
+    pub fn with_custom_file(mut self, rule: CustomFileRule) -> Self {
+        self.custom_files.push(rule);
+        self
+    }
+
+    pub fn with_custom_strings<I: IntoIterator<Item = CustomStringRule>>(mut self, rules: I) -> Self {
+        self.custom_strings.extend(rules);
+        self
+    }
+
+    pub fn with_custom_files<I: IntoIterator<Item = CustomFileRule>>(mut self, rules: I) -> Self {
+        self.custom_files.extend(rules);
+        self
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (index, rule) in self.custom_strings.iter().enumerate() {
+            if rule.pattern.is_empty() {
+                return Err(format!(
+                    "custom_strings[{index}]: pattern must not be empty"
+                ));
+            }
+            if matches!(rule.match_type, CustomStringMatch::Regex) {
+                if regex::Regex::new(&rule.pattern).is_err() {
+                    return Err(format!(
+                        "custom_strings[{index}]: invalid regex pattern: {}",
+                        rule.pattern
+                    ));
+                }
+            }
+        }
+        for (index, rule) in self.custom_files.iter().enumerate() {
+            if rule.path.is_empty() {
+                return Err(format!(
+                    "custom_files[{index}]: path must not be empty"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<RedactionRules> for RedactionPolicy {
+    fn from(rules: RedactionRules) -> Self {
+        Self {
+            rules,
+            custom_strings: Vec::new(),
+            custom_files: Vec::new(),
         }
     }
 }
@@ -144,6 +272,18 @@ impl FindingKind {
                 token_label: "ORG",
                 priority: 45,
                 containment_priority: 45,
+            },
+            Self::CustomString => FindingKindMeta {
+                label: "custom_string",
+                token_label: "CSTR",
+                priority: 95,
+                containment_priority: 40,
+            },
+            Self::CustomFile => FindingKindMeta {
+                label: "custom_file",
+                token_label: "FILE",
+                priority: 99,
+                containment_priority: 99,
             },
         }
     }
@@ -262,6 +402,8 @@ pub struct RedactionSession {
     pub fingerprint: String,
     pub redacted_fingerprint: String,
     pub redacted_text: String,
+    #[serde(default)]
+    pub policy: RedactionPolicy,
     pub entries: Vec<RestorationEntry>,
 }
 

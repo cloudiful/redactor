@@ -35,7 +35,7 @@ async fn text_routes_round_trip() {
             Request::post("/redact/text")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"text":"host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC","redaction":{"domain":true}}"#,
+                    r#"{"text":"host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC","redaction":{"domain":true,"secret":true}}"#,
                 ))
                 .expect("request"),
         )
@@ -146,7 +146,7 @@ async fn redact_text_accepts_git_diff_mode() {
             Request::post("/redact/text")
                 .header("content-type", "application/json")
                 .body(Body::from(format!(
-                    r#"{{"text":{},"input_kind":"git_diff"}}"#,
+                    r#"{{"text":{},"input_kind":"git_diff","redaction":{{"secret":true}}}}"#,
                     serde_json::to_string(diff).expect("diff json")
                 )))
                 .expect("request"),

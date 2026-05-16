@@ -14,5 +14,7 @@ pub(crate) fn display_hint(finding: &Finding) -> Option<String> {
         FindingKind::Url => stable_url_alias(&finding.match_text),
         FindingKind::Ip | FindingKind::Cidr => stable_ip_alias(&finding.match_text),
         FindingKind::Phone => stable_phone_alias(&finding.match_text),
+        FindingKind::CustomString => format!("<{}>", finding.kind.label()),
+        FindingKind::CustomFile => format!("<{}>", finding.kind.label()),
     })
 }

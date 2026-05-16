@@ -116,11 +116,16 @@ fn token_like_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::restore_text_with_session;
-    use crate::{FindingKind, RedactionRules, Redactor, RedactorBuilder};
+    use crate::{FindingKind, RedactionPolicy, Redactor, RedactorBuilder};
 
     fn domain_redactor() -> Redactor {
         RedactorBuilder::new()
-            .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+            .with_redaction_policy(
+                RedactionPolicy::default()
+                    .with_kind(FindingKind::Domain, true)
+                    .with_kind(FindingKind::Secret, true)
+                    .with_kind(FindingKind::Url, true),
+            )
             .build()
     }
 

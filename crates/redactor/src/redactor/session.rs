@@ -9,8 +9,12 @@ pub(super) trait SessionRedactorExt {
         redactor: &Redactor,
         text: &str,
     ) -> Result<String, RedactorError>;
-    fn build_redaction_session(&self, original_text: &str, redacted_text: &str)
-    -> RedactionSession;
+    fn build_redaction_session(
+        &self,
+        original_text: &str,
+        redacted_text: &str,
+        policy: &crate::RedactionPolicy,
+    ) -> RedactionSession;
     fn max_replacement_token_len(&self) -> usize;
 }
 
@@ -28,8 +32,10 @@ impl SessionRedactorExt for SessionRedactor {
         &self,
         original_text: &str,
         redacted_text: &str,
+        policy: &crate::RedactionPolicy,
     ) -> RedactionSession {
-        self.processor.build_session(original_text, redacted_text)
+        self.processor
+            .build_session(original_text, redacted_text, policy)
     }
 
     fn max_replacement_token_len(&self) -> usize {

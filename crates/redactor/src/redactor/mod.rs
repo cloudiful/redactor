@@ -1,13 +1,13 @@
+use crate::{
+    Finding, InputKind, LlmConfig, RedactionArtifact, RedactionPolicy, RedactionResult,
+    RedactionRules, RedactionSession, RedactorError, RestoreResult, restore_patch_with_session,
+    restore_text_with_session,
+};
+
 mod detection;
 mod session;
 mod stats;
 
-use crate::replace::apply_replacements;
-use crate::{
-    Finding, InputKind, LlmConfig, RedactionArtifact, RedactionResult, RedactionRules,
-    RedactionSession, RedactorError, RestoreResult, restore_patch_with_session,
-    restore_text_with_session,
-};
 use detection::detect_internal;
 use session::SessionRedactorExt;
 use stats::stats_for;
@@ -15,7 +15,7 @@ use stats::stats_for;
 #[derive(Debug, Clone, Default)]
 pub struct RedactorBuilder {
     llm: Option<LlmConfig>,
-    rules: RedactionRules,
+    policy: RedactionPolicy,
 }
 
 impl RedactorBuilder {
@@ -29,19 +29,24 @@ impl RedactorBuilder {
     }
 
     pub fn with_person_detection(mut self, enabled: bool) -> Self {
-        self.rules.person = enabled;
+        self.policy.rules.person = enabled;
         self
     }
 
     pub fn with_redaction_rules(mut self, rules: RedactionRules) -> Self {
-        self.rules = rules;
+        self.policy.rules = rules;
+        self
+    }
+
+    pub fn with_redaction_policy(mut self, policy: RedactionPolicy) -> Self {
+        self.policy = policy;
         self
     }
 
     pub fn build(self) -> Redactor {
         Redactor {
             llm: self.llm,
-            rules: self.rules,
+            policy: self.policy,
         }
     }
 }
@@ -49,7 +54,7 @@ impl RedactorBuilder {
 #[derive(Debug, Clone)]
 pub struct Redactor {
     pub(super) llm: Option<LlmConfig>,
-    pub(super) rules: RedactionRules,
+    pub(super) policy: RedactionPolicy,
 }
 
 #[derive(Debug, Default)]
@@ -71,6 +76,16 @@ impl Redactor {
         Ok(artifact.result)
     }
 
+    pub fn redact_with_source_path(
+        &self,
+        text: &str,
+        source_path: &str,
+    ) -> Result<RedactionResult, RedactorError> {
+        let artifact =
+            self.redact_artifact_with_input_kind_and_source(text, InputKind::Text, Some(source_path))?;
+        Ok(artifact.result)
+    }
+
     pub fn redact_artifact(&self, text: &str) -> Result<RedactionArtifact, RedactorError> {
         self.redact_artifact_with_input_kind(text, InputKind::Text)
     }
@@ -80,9 +95,18 @@ impl Redactor {
         text: &str,
         input_kind: InputKind,
     ) -> Result<RedactionArtifact, RedactorError> {
-        let outcome = detect_internal(self, text, input_kind)?;
+        self.redact_artifact_with_input_kind_and_source(text, input_kind, None)
+    }
+
+    pub fn redact_artifact_with_input_kind_and_source(
+        &self,
+        text: &str,
+        input_kind: InputKind,
+        source_path: Option<&str>,
+    ) -> Result<RedactionArtifact, RedactorError> {
+        let outcome = detect_internal(self, text, input_kind, source_path);
         let findings = outcome.findings;
-        let output = apply_replacements(text, &findings);
+        let output = crate::replace::apply_replacements(text, &findings, &self.policy);
         let stats = stats_for(self.llm.is_some(), &findings, outcome.stats);
 
         Ok(RedactionArtifact {
@@ -119,7 +143,16 @@ impl Redactor {
         text: &str,
         input_kind: InputKind,
     ) -> Result<Vec<Finding>, RedactorError> {
-        Ok(detect_internal(self, text, input_kind)?.findings)
+        Ok(detect_internal(self, text, input_kind, None).findings)
+    }
+
+    pub fn detect_with_source_path(
+        &self,
+        text: &str,
+        source_path: &str,
+    ) -> Result<Vec<Finding>, RedactorError> {
+        Ok(detect_internal(self, text, InputKind::Text, Some(source_path))
+            .findings)
     }
 
     pub fn restore_text(&self, text: &str, session: &RedactionSession) -> RestoreResult {
@@ -145,7 +178,11 @@ impl SessionRedactor {
     }
 
     pub fn build_session(&self, original_text: &str, redacted_text: &str) -> RedactionSession {
-        self.build_redaction_session(original_text, redacted_text)
+        self.build_redaction_session(
+            original_text,
+            redacted_text,
+            &crate::RedactionPolicy::default(),
+        )
     }
 
     pub fn max_token_len(&self) -> usize {

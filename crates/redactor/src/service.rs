@@ -23,6 +23,17 @@ pub fn redact_text_artifact(
         .map_err(anyhow::Error::new)
 }
 
+pub fn redact_text_artifact_with_source(
+    redactor: &Redactor,
+    text: &str,
+    input_kind: InputKind,
+    source_path: &str,
+) -> Result<RedactionArtifact> {
+    redactor
+        .redact_artifact_with_input_kind_and_source(text, input_kind, Some(source_path))
+        .map_err(anyhow::Error::new)
+}
+
 pub fn redact_text_with_encrypted_session(
     redactor: &Redactor,
     text: &str,
@@ -31,6 +42,27 @@ pub fn redact_text_with_encrypted_session(
 ) -> Result<EncryptedRedactionArtifact> {
     let artifact =
         redact_text_artifact(redactor, text, input_kind).context("failed to redact text input")?;
+    let encrypted_session = encrypt_session_to_string(&artifact.session, passphrase)
+        .context("failed to encrypt redaction session")?;
+    let session_summary = inspect_encrypted_session(&encrypted_session)
+        .context("failed to inspect encrypted session")?;
+
+    Ok(EncryptedRedactionArtifact {
+        artifact,
+        encrypted_session,
+        session_summary,
+    })
+}
+
+pub fn redact_text_with_encrypted_session_and_source(
+    redactor: &Redactor,
+    text: &str,
+    input_kind: InputKind,
+    source_path: &str,
+    passphrase: &str,
+) -> Result<EncryptedRedactionArtifact> {
+    let artifact = redact_text_artifact_with_source(redactor, text, input_kind, source_path)
+        .context("failed to redact text input")?;
     let encrypted_session = encrypt_session_to_string(&artifact.session, passphrase)
         .context("failed to encrypt redaction session")?;
     let session_summary = inspect_encrypted_session(&encrypted_session)
@@ -69,11 +101,23 @@ mod tests {
         redact_text_artifact, redact_text_with_encrypted_session,
         restore_text_from_encrypted_session,
     };
-    use crate::{InputKind, RedactorBuilder};
+    use crate::{InputKind, RedactionPolicy, RedactorBuilder};
+    use crate::types::FindingKind;
+
+    fn full_redactor() -> crate::Redactor {
+        RedactorBuilder::new()
+            .with_redaction_policy(
+                RedactionPolicy::default()
+                    .with_kind(FindingKind::Domain, true)
+                    .with_kind(FindingKind::Secret, true)
+                    .with_kind(FindingKind::Url, true),
+            )
+            .build()
+    }
 
     #[test]
     fn encrypted_redaction_matches_plain_artifact_output() {
-        let redactor = RedactorBuilder::new().build();
+        let redactor = full_redactor();
         let text = "host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC";
         let plain = redact_text_artifact(&redactor, text, InputKind::Text).expect("plain");
         let encrypted =
@@ -92,7 +136,7 @@ mod tests {
 
     #[test]
     fn encrypted_session_restore_round_trips() {
-        let redactor = RedactorBuilder::new().build();
+        let redactor = full_redactor();
         let text = "host=service.example.com";
         let encrypted =
             redact_text_with_encrypted_session(&redactor, text, InputKind::Text, "pass")

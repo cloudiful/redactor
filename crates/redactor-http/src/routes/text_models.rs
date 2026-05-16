@@ -1,4 +1,4 @@
-use redactor::{InputKind, RedactionRules, SessionSummary};
+use redactor::{InputKind, RedactionPolicy, SessionSummary};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -6,7 +6,8 @@ pub(crate) struct RedactTextRequest {
     pub(crate) text: String,
     #[serde(default)]
     pub(crate) input_kind: InputKind,
-    pub(crate) redaction: Option<RedactionRules>,
+    pub(crate) redaction: Option<RedactionPolicy>,
+    pub(crate) source_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

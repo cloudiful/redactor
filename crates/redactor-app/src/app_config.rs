@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use config::{ConfigSource, read};
-use redactor::RedactionRules;
+use config::{ReadOptions, read};
+use redactor::RedactionPolicy;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ pub(crate) const DEFAULT_CONFIG_PATH: &str = "redactor.toml";
 #[serde(default)]
 pub(crate) struct AppConfig {
     pub(crate) llm: LlmSettings,
-    pub(crate) redaction: RedactionRules,
+    pub(crate) redaction: RedactionPolicy,
     pub(crate) proxy: ProxySettings,
 }
 
@@ -24,7 +24,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             llm: LlmSettings::default(),
-            redaction: RedactionRules::default(),
+            redaction: RedactionPolicy::default(),
             proxy: ProxySettings::default(),
         }
     }
@@ -78,10 +78,11 @@ impl Default for ProxySettings {
 
 pub(crate) fn load(path: impl AsRef<Path>) -> Result<AppConfig> {
     let path = path.as_ref();
-    read(ConfigSource::FileWithEnv {
-        path,
-        prefix: CONFIG_ENV_PREFIX,
-    })
+    let source = path.to_string_lossy();
+    read(
+        source.as_ref(),
+        Some(ReadOptions::with_env_prefix(CONFIG_ENV_PREFIX)),
+    )
     .with_context(|| format!("failed to load application config from {}", path.display()))
 }
 

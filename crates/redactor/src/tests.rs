@@ -1,11 +1,18 @@
 use crate::{
-    FindingKind, InputKind, RedactionRules, Redactor, RedactorBuilder, decrypt_session_from_str,
+    CustomFileRule, CustomStringRule, CustomStringMatch, CustomStringScope, FindingKind,
+    InputKind, RedactionPolicy, Redactor, RedactorBuilder, decrypt_session_from_str,
     encrypt_session_to_string,
 };
 
 fn domain_redactor() -> Redactor {
     RedactorBuilder::new()
-        .with_redaction_rules(RedactionRules::default().with_kind(FindingKind::Domain, true))
+        .with_redaction_policy(
+            RedactionPolicy::default()
+                .with_kind(FindingKind::Domain, true)
+                .with_kind(FindingKind::Secret, true)
+                .with_kind(FindingKind::Url, true)
+                .with_kind(FindingKind::Cidr, true),
+        )
         .build()
 }
 
@@ -119,7 +126,7 @@ fn person_detection_is_disabled_by_default() {
 fn person_detection_can_be_enabled_explicitly() {
     let text = "name: Jane Doe\n";
     let findings = RedactorBuilder::new()
-        .with_person_detection(true)
+        .with_redaction_policy(RedactionPolicy::default().with_kind(FindingKind::Person, true))
         .build()
         .detect(text)
         .expect("detect");
@@ -156,6 +163,20 @@ fn domain_detection_can_be_enabled_explicitly() {
             .iter()
             .any(|finding| finding.kind == FindingKind::Domain)
     );
+}
+
+#[test]
+fn default_policy_only_enables_email_ip_cidr() {
+    let text = "secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC host=service.example.com admin@example.com 10.0.0.1 192.168.0.0/16 +1-555-123-4567";
+    let findings = RedactorBuilder::new().build().detect(text).expect("detect");
+
+    let kinds = findings.iter().map(|f| f.kind).collect::<Vec<_>>();
+    assert!(kinds.contains(&FindingKind::Email), "email should be detected by default");
+    assert!(kinds.contains(&FindingKind::Ip), "ip should be detected by default");
+    assert!(kinds.contains(&FindingKind::Cidr), "cidr should be detected by default");
+    assert!(!kinds.contains(&FindingKind::Domain), "domain should NOT be detected by default");
+    assert!(!kinds.contains(&FindingKind::Secret), "secret should NOT be detected by default");
+    assert!(!kinds.contains(&FindingKind::Url), "url should NOT be detected by default");
 }
 
 #[test]
@@ -327,7 +348,11 @@ fn git_diff_mode_redacts_domains_with_psl_suffixes_outside_old_allowlist() {
 #[test]
 fn url_keeps_precedence_over_embedded_secret_like_segment() {
     let text = r#"slack_webhook = "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX""#;
-    let findings = RedactorBuilder::new().build().detect(text).expect("detect");
+    let findings = RedactorBuilder::new()
+        .with_redaction_policy(RedactionPolicy::default().with_kind(FindingKind::Url, true).with_kind(FindingKind::Secret, true))
+        .build()
+        .detect(text)
+        .expect("detect");
 
     assert!(findings.iter().any(|finding| {
         finding.kind == crate::FindingKind::Url
@@ -376,9 +401,258 @@ fn substantial_ipv6_and_ipv4_still_detect_as_ips() {
         .expect("detect");
 
     assert!(findings.iter().any(|finding| {
-        finding.kind == crate::FindingKind::Ip && finding.match_text == "2001:db8:1:2::1"
+        finding.kind == FindingKind::Ip && finding.match_text == "2001:db8:1:2::1"
     }));
     assert!(findings.iter().any(|finding| {
-        finding.kind == crate::FindingKind::Ip && finding.match_text == "10.20.30.40"
+        finding.kind == FindingKind::Ip && finding.match_text == "10.20.30.40"
     }));
+}
+
+#[test]
+fn custom_string_exact_match_redacts_pattern() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: "my-secret-key".to_string(),
+        match_type: CustomStringMatch::Exact,
+        scope: CustomStringScope::Text,
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let result = redactor
+        .redact("password=my-secret-key other=my-secret-key")
+        .expect("redact");
+
+    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+    assert!(!result.redacted_text.contains("my-secret-key"));
+    assert!(result.redacted_text.contains("password="));
+    assert!(result.redacted_text.contains("other="));
+}
+
+#[test]
+fn custom_string_exact_match_finds_substring_occurrences() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: "secret".to_string(),
+        match_type: CustomStringMatch::Exact,
+        scope: CustomStringScope::Text,
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let result = redactor
+        .redact("prefix_secret_suffix another-secret")
+        .expect("redact");
+
+    assert!(result.redacted_text.contains("__R_CSTR_"));
+}
+
+#[test]
+fn custom_string_contains_match_is_case_insensitive() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: "SECRET".to_string(),
+        match_type: CustomStringMatch::Contains,
+        scope: CustomStringScope::Text,
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let result = redactor
+        .redact("password=my-secret-KEY")
+        .expect("redact");
+
+    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+}
+
+#[test]
+fn custom_string_regex_match_works() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: r"project-\d{4}".to_string(),
+        match_type: CustomStringMatch::Regex,
+        scope: CustomStringScope::Text,
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let result = redactor
+        .redact("deploy project-1234 now")
+        .expect("redact");
+
+    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+    assert!(!result.redacted_text.contains("project-1234"));
+}
+
+#[test]
+fn custom_string_line_scope_redacts_entire_line() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: "secret".to_string(),
+        match_type: CustomStringMatch::Exact,
+        scope: CustomStringScope::Line,
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let text = "safe line\npassword=secret\nanother safe line\n";
+    let session = redactor.redact_with_session(text).expect("session");
+
+    assert!(session.redacted_text.contains("safe line\n"));
+    assert!(session.redacted_text.contains("another safe line\n"));
+    let restored = redactor.restore_text(&session.redacted_text, &session);
+    assert!(restored.is_valid());
+    assert_eq!(restored.restored_text, text);
+}
+
+#[test]
+fn custom_string_line_scope_merges_multiple_matches_on_same_line() {
+    let policy = RedactionPolicy::default()
+        .with_custom_string(CustomStringRule {
+            pattern: "alpha".to_string(),
+            match_type: CustomStringMatch::Exact,
+            scope: CustomStringScope::Line,
+        })
+        .with_custom_string(CustomStringRule {
+            pattern: "beta".to_string(),
+            match_type: CustomStringMatch::Exact,
+            scope: CustomStringScope::Line,
+        });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let text = "safe\ncontains alpha and beta here\nsafe2\n";
+    let result = redactor.redact(text).expect("redact");
+
+    assert_eq!(result.findings.len(), 1);
+    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+}
+
+#[test]
+fn custom_file_rule_redacts_entire_content_for_matching_source_path() {
+    let policy = RedactionPolicy::default().with_custom_file(CustomFileRule {
+        path: "secrets/production.env".to_string(),
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let text = "DB_HOST=localhost\nDB_USER=admin\nDB_PASS=s3cret\n";
+    let artifact = redactor
+        .redact_artifact_with_input_kind_and_source(text, InputKind::Text, Some("secrets/production.env"))
+        .expect("redact");
+
+    assert!(artifact.result.redacted_text.contains("__R_FILE_001__"));
+    assert!(!artifact.result.redacted_text.contains("localhost"));
+    assert!(!artifact.result.redacted_text.contains("admin"));
+
+    let restored = redactor.restore_text(&artifact.result.redacted_text, &artifact.session);
+    assert!(restored.is_valid());
+    assert_eq!(restored.restored_text, text);
+}
+
+#[test]
+fn custom_file_rule_does_not_match_different_path() {
+    let policy = RedactionPolicy::default().with_custom_file(CustomFileRule {
+        path: "secrets/production.env".to_string(),
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let text = "DB_HOST=localhost\nDB_PASS=s3cret\n";
+    let result = redactor
+        .redact_with_source_path(text, "config/app.yml")
+        .expect("redact");
+
+    assert!(!result.redacted_text.contains("__R_FILE_"));
+}
+
+#[test]
+fn custom_file_rule_in_git_diff_matches_file_paths() {
+    let policy = RedactionPolicy::default()
+        .with_kind(FindingKind::Secret, true)
+        .with_custom_file(CustomFileRule {
+            path: "deploy/.env".to_string(),
+        });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let diff = concat!(
+        "diff --git a/deploy/.env b/deploy/.env\n",
+        "--- a/deploy/.env\n",
+        "+++ b/deploy/.env\n",
+        "@@ -1,1 +1,2 @@\n",
+        "+DATABASE_URL=postgres://host:5432/mydb\n",
+    );
+    let result = redactor
+        .redact_with_input_kind(diff, InputKind::GitDiff)
+        .expect("redact diff");
+
+    assert!(result.redacted_text.contains("__R_FILE_001__"));
+    assert!(!result.redacted_text.contains("postgres://host:5432/mydb"));
+}
+
+#[test]
+fn custom_file_rule_in_git_diff_does_not_match_other_files() {
+    let policy = RedactionPolicy::default().with_kind(FindingKind::Secret, true).with_custom_file(CustomFileRule {
+        path: "deploy/.env".to_string(),
+    });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let diff = concat!(
+        "diff --git a/app/config.yml b/app/config.yml\n",
+        "--- a/app/config.yml\n",
+        "+++ b/app/config.yml\n",
+        "@@ -1,1 +1,2 @@\n",
+        "+API_TOKEN=sk_live_1234567890ABCDEFghij\n",
+    );
+    let result = redactor
+        .redact_with_input_kind(diff, InputKind::GitDiff)
+        .expect("redact diff");
+
+    assert!(!result.redacted_text.contains("__R_FILE_"));
+    assert!(result.redacted_text.contains("__R_SECRET_001__"));
+}
+
+#[test]
+fn redact_restore_round_trip_with_custom_string() {
+    let policy = RedactionPolicy::default()
+        .with_kind(FindingKind::Ip, true)
+        .with_custom_string(CustomStringRule {
+            pattern: "project-alpha".to_string(),
+            match_type: CustomStringMatch::Exact,
+            scope: CustomStringScope::Text,
+        });
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
+    let text = "server=10.0.0.1 project=project-alpha";
+    let session = redactor.redact_with_session(text).expect("session");
+
+    let restored = redactor.restore_text(&session.redacted_text, &session);
+    assert!(restored.is_valid());
+    assert_eq!(restored.restored_text, text);
+}
+
+#[test]
+fn encrypted_session_preserves_redaction_policy() {
+    let policy = RedactionPolicy::default()
+        .with_kind(FindingKind::Secret, true)
+        .with_custom_string(CustomStringRule {
+            pattern: "project-alpha".to_string(),
+            match_type: CustomStringMatch::Exact,
+            scope: CustomStringScope::Text,
+        })
+        .with_custom_file(CustomFileRule {
+            path: "secrets/production.env".to_string(),
+        });
+    let redactor = RedactorBuilder::new()
+        .with_redaction_policy(policy.clone())
+        .build();
+    let session = redactor.redact_with_session("project-alpha").expect("session");
+    let encrypted = encrypt_session_to_string(&session, "passphrase").expect("encrypt");
+    let decrypted = decrypt_session_from_str(&encrypted, "passphrase").expect("decrypt");
+
+    assert_eq!(decrypted.policy, policy);
+}
+
+#[test]
+fn invalid_regex_in_custom_string_returns_validation_error() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: "[invalid(regex".to_string(),
+        match_type: CustomStringMatch::Regex,
+        scope: CustomStringScope::Text,
+    });
+    assert!(policy.validate().is_err());
+}
+
+#[test]
+fn empty_pattern_in_custom_string_returns_validation_error() {
+    let policy = RedactionPolicy::default().with_custom_string(CustomStringRule {
+        pattern: "".to_string(),
+        match_type: CustomStringMatch::Exact,
+        scope: CustomStringScope::Text,
+    });
+    assert!(policy.validate().is_err());
+}
+
+#[test]
+fn empty_path_in_custom_file_returns_validation_error() {
+    let policy = RedactionPolicy::default().with_custom_file(CustomFileRule {
+        path: "".to_string(),
+    });
+    assert!(policy.validate().is_err());
 }

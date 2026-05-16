@@ -11,6 +11,7 @@ pub(crate) fn normalize(kind: FindingKind, value: &str) -> String {
         FindingKind::Person | FindingKind::Organization => {
             value.split_whitespace().collect::<Vec<_>>().join(" ")
         }
+        FindingKind::CustomString | FindingKind::CustomFile => value.trim().to_string(),
     }
 }
 

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use redactor::RedactionRules;
+use redactor::RedactionPolicy;
 use reqwest::Client;
 use server::{CorsConfig, ServerConfig, TlsConfig, ValidatedServerConfig};
 use std::env;
@@ -16,7 +16,7 @@ pub struct ProxyConfig {
     pub cors_allowed_origins: Vec<String>,
     pub tls_cert_path: Option<PathBuf>,
     pub tls_key_path: Option<PathBuf>,
-    pub redaction_rules: RedactionRules,
+    pub redaction_policy: RedactionPolicy,
     session_passphrase_override: Option<String>,
 }
 
@@ -37,7 +37,7 @@ impl ProxyConfig {
             cors_allowed_origins: Vec::new(),
             tls_cert_path: None,
             tls_key_path: None,
-            redaction_rules: RedactionRules::default(),
+            redaction_policy: RedactionPolicy::default(),
             session_passphrase_override: None,
         }
     }
@@ -66,8 +66,8 @@ impl ProxyConfig {
         self
     }
 
-    pub fn with_redaction_rules(mut self, rules: RedactionRules) -> Self {
-        self.redaction_rules = rules;
+    pub fn with_redaction_policy(mut self, policy: RedactionPolicy) -> Self {
+        self.redaction_policy = policy;
         self
     }
 
@@ -111,7 +111,7 @@ pub(crate) struct ProxyState {
     pub(crate) audit_dir: Option<PathBuf>,
     pub(crate) session_passphrase_env: String,
     pub(crate) session_passphrase: Option<String>,
-    pub(crate) redaction_rules: RedactionRules,
+    pub(crate) redaction_policy: RedactionPolicy,
     pub(crate) client: Client,
 }
 
@@ -128,7 +128,7 @@ impl ProxyState {
             audit_dir: config.audit_dir.clone(),
             session_passphrase_env: config.session_passphrase_env.clone(),
             session_passphrase,
-            redaction_rules: config.redaction_rules,
+            redaction_policy: config.redaction_policy.clone(),
             client: Client::builder()
                 .build()
                 .context("failed to construct proxy HTTP client")?,

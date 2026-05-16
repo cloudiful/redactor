@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use redactor::RedactionRules;
+use redactor::RedactionPolicy;
 
 use crate::cli::{InputArgs, InputKindArgs, ReportArgs, ReportFormat};
 use crate::io::read_input;
@@ -10,13 +10,22 @@ pub(crate) fn run(
     report: ReportArgs,
     input_kind: InputKindArgs,
     llm: ResolvedLlmArgs,
-    rules: RedactionRules,
+    policy: RedactionPolicy,
+    source_path: Option<String>,
 ) -> Result<()> {
     let text = read_input(input.input)?;
-    let redactor = build_redactor(llm, rules);
-    let findings = redactor
-        .detect_with_input_kind(&text, input_kind.input_kind.into())
-        .context("failed to detect sensitive values")?;
+    let redactor = build_redactor(llm, policy);
+    let input_kind = redactor::InputKind::from(input_kind.input_kind);
+
+    let findings = if let Some(ref source) = source_path {
+        redactor
+            .detect_with_source_path(&text, source)
+            .context("failed to detect sensitive values")?
+    } else {
+        redactor
+            .detect_with_input_kind(&text, input_kind)
+            .context("failed to detect sensitive values")?
+    };
 
     match report.report {
         ReportFormat::Human => {

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 use crate::types::{
-    AppliedReplacement, Finding, FindingKind, RedactionSession, ReplacementStrategy,
+    AppliedReplacement, Finding, FindingKind, RedactionPolicy, RedactionSession, ReplacementStrategy,
     RestorationEntry,
 };
 
@@ -77,6 +77,7 @@ impl ReplacementProcessor {
         &self,
         original_text: &str,
         redacted_text: &str,
+        policy: &RedactionPolicy,
     ) -> RedactionSession {
         let entries = self
             .state
@@ -98,6 +99,7 @@ impl ReplacementProcessor {
             fingerprint: sha256_hex(original_text),
             redacted_fingerprint: sha256_hex(redacted_text),
             redacted_text: redacted_text.to_string(),
+            policy: policy.clone(),
             entries,
         }
     }
@@ -107,10 +109,14 @@ impl ReplacementProcessor {
     }
 }
 
-pub(crate) fn apply_replacements(text: &str, findings: &[Finding]) -> ReplacementOutput {
+pub(crate) fn apply_replacements(
+    text: &str,
+    findings: &[Finding],
+    policy: &RedactionPolicy,
+) -> ReplacementOutput {
     let mut processor = ReplacementProcessor::new();
     let redacted_text = processor.redact_fragment(text, findings);
-    let session = processor.build_session(text, &redacted_text);
+    let session = processor.build_session(text, &redacted_text, policy);
     let applied_replacements = processor.into_applied_replacements();
 
     ReplacementOutput {
