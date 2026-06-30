@@ -7,8 +7,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::settings::{
-    DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, DEFAULT_PROXY_LISTEN, DEFAULT_PROXY_UPSTREAM,
-    DEFAULT_SESSION_PASSPHRASE_ENV, DEFAULT_UPSTREAM_API_KEY_ENV, LlmMode,
+    DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, DEFAULT_PROXY_LISTEN,
+    DEFAULT_SESSION_PASSPHRASE_ENV, LlmMode,
 };
 
 pub(crate) const CONFIG_ENV_PREFIX: &str = "REDACTOR_";
@@ -44,8 +44,6 @@ impl Default for LlmSettings {
 #[serde(default)]
 pub(crate) struct ProxySettings {
     pub(crate) listen: String,
-    pub(crate) upstream: String,
-    pub(crate) api_key_env: String,
     pub(crate) audit_dir: Option<PathBuf>,
     pub(crate) session_passphrase_env: String,
     pub(crate) valkey_url: Option<String>,
@@ -60,8 +58,6 @@ impl Default for ProxySettings {
     fn default() -> Self {
         Self {
             listen: DEFAULT_PROXY_LISTEN.to_string(),
-            upstream: DEFAULT_PROXY_UPSTREAM.to_string(),
-            api_key_env: DEFAULT_UPSTREAM_API_KEY_ENV.to_string(),
             audit_dir: None,
             session_passphrase_env: DEFAULT_SESSION_PASSPHRASE_ENV.to_string(),
             valkey_url: None,

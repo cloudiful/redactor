@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
 use redactor::{RedactionPolicy, SessionStore};
-#[cfg(feature = "chat-responses-proxy")]
-use redactor_chat_responses_proxy::ChatResponsesProxyContext;
 #[cfg(feature = "valkey-session-store")]
 use redactor_session_store_valkey::ValkeySessionStore;
-use reqwest::Client;
 use server::{CorsConfig, ServerConfig, TlsConfig, ValidatedServerConfig};
 use std::env;
 use std::path::PathBuf;
@@ -13,8 +10,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ProxyConfig {
     pub listen: String,
-    pub upstream: String,
-    pub api_key_env: Option<String>,
     pub audit_dir: Option<PathBuf>,
     pub session_passphrase_env: String,
     pub cors_allowed_origins: Vec<String>,
@@ -28,15 +23,11 @@ pub struct ProxyConfig {
 impl ProxyConfig {
     pub fn new(
         listen: String,
-        upstream: String,
-        api_key_env: Option<String>,
         audit_dir: Option<PathBuf>,
         session_passphrase_env: String,
     ) -> Self {
         Self {
             listen,
-            upstream,
-            api_key_env,
             audit_dir,
             session_passphrase_env,
             cors_allowed_origins: Vec::new(),
@@ -135,17 +126,11 @@ impl ProxyConfig {
 
 #[derive(Clone)]
 pub(crate) struct ProxyState {
-    #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
-    pub(crate) upstream: String,
-    #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
-    pub(crate) api_key_env: Option<String>,
     pub(crate) audit_dir: Option<PathBuf>,
     pub(crate) session_passphrase_env: String,
     pub(crate) session_passphrase: Option<String>,
     pub(crate) redaction_policy: RedactionPolicy,
     pub(crate) session_store: Option<Arc<dyn SessionStore>>,
-    #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
-    pub(crate) client: Client,
 }
 
 impl ProxyState {
@@ -156,30 +141,11 @@ impl ProxyState {
             .or_else(|| env::var(&config.session_passphrase_env).ok());
 
         Ok(Arc::new(Self {
-            upstream: config.upstream.trim_end_matches('/').to_string(),
-            api_key_env: config.api_key_env.clone(),
             audit_dir: config.audit_dir.clone(),
             session_passphrase_env: config.session_passphrase_env.clone(),
             session_passphrase,
             redaction_policy: config.redaction_policy.clone(),
             session_store: config.session_store.clone(),
-            client: Client::builder()
-                .build()
-                .context("failed to construct proxy HTTP client")?,
         }))
-    }
-
-    #[cfg(feature = "chat-responses-proxy")]
-    pub(crate) fn chat_responses_proxy_context(&self) -> ChatResponsesProxyContext {
-        ChatResponsesProxyContext::new(
-            self.upstream.clone(),
-            self.api_key_env.clone(),
-            self.audit_dir.clone(),
-            self.session_passphrase_env.clone(),
-            self.session_passphrase.clone(),
-            self.redaction_policy.clone(),
-            self.session_store.clone(),
-            self.client.clone(),
-        )
     }
 }

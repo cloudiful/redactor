@@ -69,8 +69,6 @@ impl SessionStore for MemorySessionStore {
 async fn text_routes_round_trip() {
     let app = app(ProxyConfig::new(
         "127.0.0.1:0".to_string(),
-        "https://openrouter.ai/api/v1".to_string(),
-        None,
         None,
         "IGNORED".to_string(),
     )
@@ -142,8 +140,6 @@ async fn text_routes_round_trip() {
 async fn redact_text_leaves_domains_by_default() {
     let app = app(ProxyConfig::new(
         "127.0.0.1:0".to_string(),
-        "https://openrouter.ai/api/v1".to_string(),
-        None,
         None,
         "IGNORED".to_string(),
     )
@@ -174,8 +170,6 @@ async fn redact_text_leaves_domains_by_default() {
 async fn redact_text_accepts_git_diff_mode() {
     let app = app(ProxyConfig::new(
         "127.0.0.1:0".to_string(),
-        "https://openrouter.ai/api/v1".to_string(),
-        None,
         None,
         "IGNORED".to_string(),
     )
@@ -227,8 +221,6 @@ async fn text_routes_support_external_id_with_store_provider() {
     let app = app(
         ProxyConfig::new(
             "127.0.0.1:0".to_string(),
-            "https://openrouter.ai/api/v1".to_string(),
-            None,
             None,
             "IGNORED".to_string(),
         )
@@ -277,8 +269,6 @@ async fn text_routes_reject_external_id_without_store_provider() {
     let app = app(
         ProxyConfig::new(
             "127.0.0.1:0".to_string(),
-            "https://openrouter.ai/api/v1".to_string(),
-            None,
             None,
             "IGNORED".to_string(),
         )

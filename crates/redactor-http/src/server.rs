@@ -6,7 +6,7 @@ use axum::routing::{get, post};
 use server::axum::Server;
 use std::sync::Arc;
 
-use crate::routes::{proxy, text};
+use crate::routes::text;
 use crate::state::{ProxyConfig, ProxyState};
 
 pub fn app(config: ProxyConfig) -> Result<Router> {
@@ -30,8 +30,6 @@ fn router() -> Router<Arc<ProxyState>> {
         .route("/redact/text", post(text::redact_text))
         .route("/restore/text", post(text::restore_text))
         .route("/inspect/session", post(text::inspect_session))
-        .route("/v1/chat/completions", post(proxy::proxy_chat))
-        .route("/v1/responses", post(proxy::proxy_responses))
 }
 
 async fn healthz() -> impl IntoResponse {

@@ -123,10 +123,6 @@ enum Command {
         #[arg(long)]
         listen: Option<String>,
         #[arg(long)]
-        upstream: Option<String>,
-        #[arg(long)]
-        api_key_env: Option<String>,
-        #[arg(long)]
         audit_dir: Option<PathBuf>,
         #[arg(long)]
         valkey_url: Option<String>,
@@ -414,8 +410,6 @@ pub(crate) fn run() -> Result<()> {
         }
         Command::Proxy {
             listen,
-            upstream,
-            api_key_env,
             audit_dir,
             valkey_url,
             session_ttl_seconds,
@@ -432,8 +426,6 @@ pub(crate) fn run() -> Result<()> {
                 let proxy_config = app_config.proxy;
                 let mut proxy = ProxyConfig::new(
                     listen.unwrap_or(proxy_config.listen),
-                    upstream.unwrap_or(proxy_config.upstream),
-                    Some(api_key_env.unwrap_or(proxy_config.api_key_env)),
                     audit_dir.or(proxy_config.audit_dir),
                     session_passphrase_env
                         .session_passphrase_env
@@ -475,8 +467,6 @@ pub(crate) fn run() -> Result<()> {
             {
                 let _ = (
                     listen,
-                    upstream,
-                    api_key_env,
                     audit_dir,
                     valkey_url,
                     session_ttl_seconds,

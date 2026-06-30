@@ -7,19 +7,16 @@ repository.workspace = true
 
 [features]
 default = []
-chat-responses-proxy = ["dep:redactor-chat-responses-proxy"]
 valkey-session-store = ["dep:redactor-session-store-valkey"]
 
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 server.workspace = true
 tokio.workspace = true
 redactor = { package = "cloudiful-redactor", path = "../redactor" }
-redactor-chat-responses-proxy = { path = "../redactor-chat-responses-proxy", optional = true }
 redactor-session-store-valkey = { path = "../redactor-session-store-valkey", optional = true }
 
 [dev-dependencies]
