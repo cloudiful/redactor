@@ -8,17 +8,18 @@ mod transform;
 use anyhow::{Context, Result};
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Response, StatusCode};
-use redactor::{RedactorBuilder, ensure_restore_valid};
+use redactor::{RedactorBuilder, SessionStore, ensure_restore_valid};
 use reqwest::Client;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::audit::maybe_write_audit;
 use crate::http::{build_response, error_response, filtered_headers};
 use crate::stream::restore_sse_stream;
 use crate::transform::{ApiEndpoint, redact_json_request, restore_json_response};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChatResponsesProxyContext {
     upstream: String,
     api_key_env: Option<String>,
@@ -26,6 +27,7 @@ pub struct ChatResponsesProxyContext {
     session_passphrase_env: String,
     session_passphrase: Option<String>,
     redaction_policy: redactor::RedactionPolicy,
+    session_store: Option<Arc<dyn SessionStore>>,
     client: Client,
 }
 
@@ -38,6 +40,7 @@ impl ChatResponsesProxyContext {
         session_passphrase_env: String,
         session_passphrase: Option<String>,
         redaction_policy: redactor::RedactionPolicy,
+        session_store: Option<Arc<dyn SessionStore>>,
         client: Client,
     ) -> Self {
         Self {
@@ -47,6 +50,7 @@ impl ChatResponsesProxyContext {
             session_passphrase_env,
             session_passphrase,
             redaction_policy,
+            session_store,
             client,
         }
     }
@@ -76,7 +80,44 @@ async fn proxy_request(
 ) -> Response<Body> {
     match proxy_request_inner(endpoint, ctx, headers, body).await {
         Ok(response) => response,
-        Err(error) => error_response(StatusCode::BAD_GATEWAY, error.to_string(), "proxy_error"),
+        Err(error) => {
+            let status = error
+                .downcast_ref::<ProxyRequestError>()
+                .map(ProxyRequestError::status)
+                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let kind = error
+                .downcast_ref::<ProxyRequestError>()
+                .map(ProxyRequestError::kind)
+                .unwrap_or("proxy_error");
+            error_response(status, error.to_string(), kind)
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ProxyRequestError {
+    #[error("invalid JSON request body")]
+    InvalidJson,
+    #[error("body external_id does not match x-redactor-external-id header")]
+    ExternalIdConflict,
+    #[error("external_id stateful session operations require a configured session store provider")]
+    MissingSessionStore,
+}
+
+impl ProxyRequestError {
+    fn status(&self) -> StatusCode {
+        match self {
+            Self::InvalidJson | Self::ExternalIdConflict => StatusCode::BAD_REQUEST,
+            Self::MissingSessionStore => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::InvalidJson => "invalid_request",
+            Self::ExternalIdConflict => "invalid_request",
+            Self::MissingSessionStore => "proxy_config_error",
+        }
     }
 }
 
@@ -86,7 +127,26 @@ async fn proxy_request_inner(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>> {
-    let body_json: Value = serde_json::from_slice(&body).context("invalid JSON request body")?;
+    let body_json: Value =
+        serde_json::from_slice(&body).map_err(|_| anyhow::Error::new(ProxyRequestError::InvalidJson))?;
+    let body_external_id = body_json
+        .get("external_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let header_external_id = headers
+        .get("x-redactor-external-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+    if body_external_id.is_some()
+        && header_external_id.is_some()
+        && body_external_id != header_external_id
+    {
+        return Err(anyhow::Error::new(ProxyRequestError::ExternalIdConflict));
+    }
+    let external_id = body_external_id.or(header_external_id);
+    if external_id.is_some() && ctx.session_store.is_none() {
+        return Err(anyhow::Error::new(ProxyRequestError::MissingSessionStore));
+    }
     let is_stream = body_json
         .get("stream")
         .and_then(Value::as_bool)
@@ -94,7 +154,13 @@ async fn proxy_request_inner(
     let redactor = RedactorBuilder::new()
         .with_redaction_policy(ctx.redaction_policy.clone())
         .build();
-    let redacted = redact_json_request(endpoint, body_json, &redactor)?;
+    let redacted = redact_json_request(
+        endpoint,
+        body_json,
+        &redactor,
+        external_id.as_deref(),
+        ctx.session_store.as_deref(),
+    )?;
 
     maybe_write_audit(ctx, &redacted.session)?;
 

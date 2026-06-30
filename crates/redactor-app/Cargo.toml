@@ -15,6 +15,7 @@ clap.workspace = true
 config.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml = "0.9.8"
 redactor = { package = "cloudiful-redactor", path = "../redactor" }
 redactor-http = { path = "../redactor-http", optional = true }
 
@@ -27,3 +28,4 @@ default = []
 ollama = ["redactor/ollama"]
 proxy = ["dep:redactor-http", "dep:tokio"]
 chat-responses-proxy = ["redactor-http/chat-responses-proxy"]
+valkey-session-store = ["redactor-http/valkey-session-store"]

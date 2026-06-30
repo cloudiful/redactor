@@ -1,0 +1,13 @@
+[package]
+name = "redactor-session-store-valkey"
+version.workspace = true
+edition.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+redis.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+redactor = { package = "cloudiful-redactor", path = "../redactor" }

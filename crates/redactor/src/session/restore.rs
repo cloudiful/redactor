@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{Result, anyhow};
 
+use crate::replace::{is_v2_token_like, parse_token, token_like_ranges};
 use crate::types::{RedactionSession, RestoreResult};
 
 pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> RestoreResult {
@@ -24,14 +25,30 @@ pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> Res
     for token_range in token_like_ranges(input) {
         restored_text.push_str(&input[cursor..token_range.start]);
         let candidate = &input[token_range.clone()];
-        if !known_tokens.contains(candidate) {
-            validation_errors.push(format!("unknown or malformed token `{candidate}`"));
-            restored_text.push_str(candidate);
-        } else if let Some(original) = token_map.get(candidate) {
-            restored_text.push_str(original);
-            restored_count += 1;
-        } else {
-            restored_text.push_str(candidate);
+        match parse_token(candidate) {
+            Ok(parsed) if parsed.scope_id != session.scope_id => {
+                validation_errors.push(format!(
+                    "token `{candidate}` does not belong to session scope `{}`",
+                    session.scope_id
+                ));
+                restored_text.push_str(candidate);
+            }
+            Ok(_) if !known_tokens.contains(candidate) => {
+                validation_errors.push(format!("unknown token `{candidate}`"));
+                restored_text.push_str(candidate);
+            }
+            Ok(_) => {
+                if let Some(original) = token_map.get(candidate) {
+                    restored_text.push_str(original);
+                    restored_count += 1;
+                } else {
+                    restored_text.push_str(candidate);
+                }
+            }
+            Err(error) => {
+                validation_errors.push(format!("malformed token `{candidate}`: {error}"));
+                restored_text.push_str(candidate);
+            }
         }
         cursor = token_range.end;
     }
@@ -40,15 +57,13 @@ pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> Res
     let unresolved_tokens = token_like_ranges(&restored_text)
         .into_iter()
         .map(|range| restored_text[range].to_string())
-        .filter(|candidate| candidate.starts_with("__R_"))
+        .filter(|candidate| is_v2_token_like(candidate))
         .collect::<Vec<_>>();
 
     if !unresolved_tokens.is_empty() {
-        validation_errors.extend(
-            unresolved_tokens
-                .iter()
-                .map(|candidate| format!("unresolved token remained after restore: `{candidate}`")),
-        );
+        validation_errors.extend(unresolved_tokens.iter().map(|candidate| {
+            format!("unresolved token remained after restore: `{candidate}`")
+        }));
     }
 
     RestoreResult {
@@ -79,38 +94,6 @@ pub fn ensure_restore_valid(result: &RestoreResult) -> Result<()> {
         ));
     }
     Err(anyhow!(messages.join("; ")))
-}
-
-fn token_like_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
-    let mut ranges = Vec::new();
-    let bytes = text.as_bytes();
-    let mut index = 0;
-
-    while index + 4 <= bytes.len() {
-        if &bytes[index..index + 4] != b"__R_" {
-            index += 1;
-            continue;
-        }
-
-        let mut end = index + 4;
-        while end < bytes.len() {
-            let byte = bytes[end];
-            if byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_' {
-                end += 1;
-                continue;
-            }
-            break;
-        }
-
-        if end + 1 < bytes.len() && bytes[end] == b'_' && bytes[end + 1] == b'_' {
-            end += 2;
-        }
-
-        ranges.push(index..end);
-        index = end.max(index + 1);
-    }
-
-    ranges
 }
 
 #[cfg(test)]
@@ -148,14 +131,38 @@ mod tests {
         let session = redactor
             .redact_with_session("host=service.example.com")
             .expect("session");
-        let restored = restore_text_with_session("__R_DOMAIN_001__ __R_DOMAIN_999__", &session);
+        let unknown = crate::replace::format_token(&session.scope_id, FindingKind::Domain, 999);
+        let restored = restore_text_with_session(
+            &format!("{} {}", session.entries[0].token, unknown),
+            &session,
+        );
 
         assert!(
             restored
                 .validation_errors
                 .iter()
-                .any(|message| message.contains("unknown or malformed token `__R_DOMAIN_999__`"))
+                .any(|message| message.contains("unknown token") || message.contains("unresolved token"))
         );
-        assert_eq!(restored.unresolved_tokens, vec!["__R_DOMAIN_999__"]);
+        assert_eq!(restored.unresolved_tokens, vec![unknown]);
+    }
+
+    #[test]
+    fn restore_rejects_scope_mismatch() {
+        let redactor = domain_redactor();
+        let left = redactor
+            .redact_with_session("host=service.example.com")
+            .expect("left session");
+        let right = redactor
+            .redact_with_session("host=backup.example.com")
+            .expect("right session");
+        let restored = restore_text_with_session(&left.redacted_text, &right);
+
+        assert!(!restored.is_valid());
+        assert!(
+            restored
+                .validation_errors
+                .iter()
+                .any(|message| message.contains("does not belong to session scope"))
+        );
     }
 }

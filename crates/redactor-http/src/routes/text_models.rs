@@ -8,6 +8,7 @@ pub(crate) struct RedactTextRequest {
     pub(crate) input_kind: InputKind,
     pub(crate) redaction: Option<RedactionPolicy>,
     pub(crate) source_path: Option<String>,
+    pub(crate) external_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -20,7 +21,8 @@ pub(crate) struct RedactTextResponse {
 #[derive(Debug, Deserialize)]
 pub(crate) struct RestoreTextRequest {
     pub(crate) text: String,
-    pub(crate) encrypted_session: String,
+    pub(crate) encrypted_session: Option<String>,
+    pub(crate) external_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

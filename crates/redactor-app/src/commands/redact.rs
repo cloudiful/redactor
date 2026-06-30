@@ -11,23 +11,32 @@ use crate::io::read_input;
 use crate::output::{SanitizedRedactionOutput, print_report};
 use crate::support::{ResolvedLlmArgs, build_redactor, resolve_session_passphrase};
 
-pub(crate) fn run(
-    input: InputArgs,
-    report: ReportArgs,
-    input_kind: InputKindArgs,
-    llm: ResolvedLlmArgs,
-    policy: RedactionPolicy,
-    source_path: Option<String>,
-    session_out: Option<PathBuf>,
-    session_passphrase: SessionPassphraseArgs,
-) -> Result<()> {
-    let text = read_input(input.input)?;
-    let redactor = build_redactor(llm, policy);
-    let input_kind = InputKind::from(input_kind.input_kind);
+pub(crate) struct RedactCommand {
+    pub(crate) input: InputArgs,
+    pub(crate) report: ReportArgs,
+    pub(crate) input_kind: InputKindArgs,
+    pub(crate) llm: ResolvedLlmArgs,
+    pub(crate) policy: RedactionPolicy,
+    pub(crate) source_path: Option<String>,
+    pub(crate) external_id: Option<String>,
+    pub(crate) session_out: Option<PathBuf>,
+    pub(crate) session_passphrase: SessionPassphraseArgs,
+}
 
-    if let Some(path) = session_out {
-        let passphrase = resolve_session_passphrase(session_passphrase)?;
-        let secured = if let Some(ref source) = source_path {
+pub(crate) fn run(command: RedactCommand) -> Result<()> {
+    let text = read_input(command.input.input)?;
+    let redactor = build_redactor(command.llm, command.policy);
+    let input_kind = InputKind::from(command.input_kind.input_kind);
+
+    if command.external_id.is_some() {
+        return Err(anyhow::anyhow!(
+            "external_id stateful redaction requires an injected session store provider; the CLI does not ship a built-in provider"
+        ));
+    }
+
+    if let Some(path) = command.session_out {
+        let passphrase = resolve_session_passphrase(command.session_passphrase)?;
+        let secured = if let Some(ref source) = command.source_path {
             redactor::redact_text_with_encrypted_session_and_source(
                 &redactor,
                 &text,
@@ -43,7 +52,7 @@ pub(crate) fn run(
         fs::write(&path, &secured.encrypted_session)
             .with_context(|| format!("failed to write session file {}", path.display()))?;
         print_report(
-            report.report,
+            command.report.report,
             &SanitizedRedactionOutput {
                 redacted_text: secured.artifact.session.redacted_text.clone(),
                 session_file: Some(path.display().to_string()),
@@ -52,14 +61,14 @@ pub(crate) fn run(
             &secured.artifact.session.redacted_text,
         )
     } else {
-        let artifact = if let Some(ref source) = source_path {
+        let artifact = if let Some(ref source) = command.source_path {
             redactor::redact_text_artifact_with_source(&redactor, &text, input_kind, source)
                 .context("failed to redact input")?
         } else {
             redact_text_artifact(&redactor, &text, input_kind).context("failed to redact input")?
         };
         print_report(
-            report.report,
+            command.report.report,
             &SanitizedRedactionOutput {
                 redacted_text: artifact.result.redacted_text.clone(),
                 session_file: None,

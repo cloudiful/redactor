@@ -12,15 +12,15 @@ pub(crate) fn select_non_overlapping(mut findings: Vec<Finding>) -> (Vec<Finding
     let mut dropped = 0;
 
     for finding in findings {
-        if let Some(previous) = selected.last_mut() {
-            if overlaps(previous, &finding) {
-                if prefer_right(previous, &finding) {
-                    *previous = finding;
-                } else {
-                    dropped += 1;
-                }
-                continue;
+        if let Some(previous) = selected.last_mut()
+            && overlaps(previous, &finding)
+        {
+            if prefer_right(previous, &finding) {
+                *previous = finding;
+            } else {
+                dropped += 1;
             }
+            continue;
         }
 
         selected.push(finding);

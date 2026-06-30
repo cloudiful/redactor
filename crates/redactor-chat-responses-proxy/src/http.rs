@@ -55,7 +55,11 @@ pub(crate) fn filtered_headers(
     let mut has_authorization = false;
 
     for (name, value) in headers {
-        if is_hop_by_hop(name) || name == HOST || name == CONTENT_LENGTH {
+        if is_hop_by_hop(name)
+            || name == HOST
+            || name == CONTENT_LENGTH
+            || name.as_str().eq_ignore_ascii_case("x-redactor-external-id")
+        {
             continue;
         }
         if name == AUTHORIZATION {
@@ -64,14 +68,13 @@ pub(crate) fn filtered_headers(
         forwarded.push((name.clone(), value.clone()));
     }
 
-    if !has_authorization {
-        if let Some(env_name) = api_key_env {
-            if let Ok(api_key) = env::var(env_name) {
-                let value = HeaderValue::from_str(&format!("Bearer {api_key}"))
-                    .map_err(|error| anyhow::anyhow!("invalid API key header: {error}"))?;
-                forwarded.push((AUTHORIZATION, value));
-            }
-        }
+    if !has_authorization
+        && let Some(env_name) = api_key_env
+        && let Ok(api_key) = env::var(env_name)
+    {
+        let value = HeaderValue::from_str(&format!("Bearer {api_key}"))
+            .map_err(|error| anyhow::anyhow!("invalid API key header: {error}"))?;
+        forwarded.push((AUTHORIZATION, value));
     }
 
     Ok(forwarded)

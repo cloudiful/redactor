@@ -1,14 +1,16 @@
 use anyhow::{Context, Result};
-use redactor::RedactionPolicy;
+use redactor::{RedactionPolicy, SessionStore};
 #[cfg(feature = "chat-responses-proxy")]
 use redactor_chat_responses_proxy::ChatResponsesProxyContext;
+#[cfg(feature = "valkey-session-store")]
+use redactor_session_store_valkey::ValkeySessionStore;
 use reqwest::Client;
 use server::{CorsConfig, ServerConfig, TlsConfig, ValidatedServerConfig};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProxyConfig {
     pub listen: String,
     pub upstream: String,
@@ -20,6 +22,7 @@ pub struct ProxyConfig {
     pub tls_key_path: Option<PathBuf>,
     pub redaction_policy: RedactionPolicy,
     session_passphrase_override: Option<String>,
+    session_store: Option<Arc<dyn SessionStore>>,
 }
 
 impl ProxyConfig {
@@ -41,6 +44,7 @@ impl ProxyConfig {
             tls_key_path: None,
             redaction_policy: RedactionPolicy::default(),
             session_passphrase_override: None,
+            session_store: None,
         }
     }
 
@@ -71,6 +75,29 @@ impl ProxyConfig {
     pub fn with_redaction_policy(mut self, policy: RedactionPolicy) -> Self {
         self.redaction_policy = policy;
         self
+    }
+
+    pub fn with_session_store(mut self, session_store: Arc<dyn SessionStore>) -> Self {
+        self.session_store = Some(session_store);
+        self
+    }
+
+    #[cfg(feature = "valkey-session-store")]
+    pub fn with_valkey_session_store(
+        mut self,
+        url: &str,
+        key_prefix: Option<&str>,
+        ttl_seconds: Option<u64>,
+    ) -> Result<Self> {
+        let mut builder = ValkeySessionStore::builder(url);
+        if let Some(key_prefix) = key_prefix {
+            builder = builder.with_key_prefix(key_prefix);
+        }
+        if let Some(ttl_seconds) = ttl_seconds {
+            builder = builder.with_ttl_seconds(ttl_seconds);
+        }
+        self.session_store = Some(Arc::new(builder.build()?));
+        Ok(self)
     }
 
     pub(crate) fn server_config(&self) -> Result<ValidatedServerConfig<Arc<ProxyState>>> {
@@ -106,7 +133,7 @@ impl ProxyConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ProxyState {
     #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
     pub(crate) upstream: String,
@@ -116,6 +143,7 @@ pub(crate) struct ProxyState {
     pub(crate) session_passphrase_env: String,
     pub(crate) session_passphrase: Option<String>,
     pub(crate) redaction_policy: RedactionPolicy,
+    pub(crate) session_store: Option<Arc<dyn SessionStore>>,
     #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
     pub(crate) client: Client,
 }
@@ -134,6 +162,7 @@ impl ProxyState {
             session_passphrase_env: config.session_passphrase_env.clone(),
             session_passphrase,
             redaction_policy: config.redaction_policy.clone(),
+            session_store: config.session_store.clone(),
             client: Client::builder()
                 .build()
                 .context("failed to construct proxy HTTP client")?,
@@ -149,6 +178,7 @@ impl ProxyState {
             self.session_passphrase_env.clone(),
             self.session_passphrase.clone(),
             self.redaction_policy.clone(),
+            self.session_store.clone(),
             self.client.clone(),
         )
     }

@@ -9,6 +9,8 @@ pub fn inspect_encrypted_session(data: &str) -> Result<SessionSummary> {
     Ok(SessionSummary {
         version: envelope.version,
         session_id: envelope.session_id,
+        scope_id: envelope.scope_id,
+        external_id: envelope.external_id,
         fingerprint: envelope.fingerprint,
         redacted_fingerprint: envelope.redacted_fingerprint,
         entry_count: envelope.entry_count,

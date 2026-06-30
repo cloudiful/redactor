@@ -14,12 +14,15 @@ pub use llm::LlmConfig;
 pub use redactor::{Redactor, RedactorBuilder, SessionRedactor};
 pub use service::{
     EncryptedRedactionArtifact, decrypt_redaction_session, redact_text_artifact,
-    redact_text_artifact_with_source, redact_text_with_encrypted_session,
+    redact_text_artifact_with_source, redact_text_artifact_with_source_and_stateful_session,
+    redact_text_artifact_with_stateful_session, redact_text_with_encrypted_session,
     redact_text_with_encrypted_session_and_source, restore_text_from_encrypted_session,
+    restore_text_from_store,
 };
 pub use session::{
     decrypt_session_from_str, encrypt_session_to_string, ensure_restore_valid,
-    inspect_encrypted_session, restore_patch_with_session, restore_text_with_session,
+    inspect_encrypted_session, require_external_id, restore_patch_with_session,
+    restore_text_with_session, SessionStore, StoredSession,
 };
 use thiserror::Error;
 pub use types::{

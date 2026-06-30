@@ -61,6 +61,8 @@ enum Command {
         #[arg(long)]
         source_path: Option<String>,
         #[arg(long)]
+        external_id: Option<String>,
+        #[arg(long)]
         session_out: Option<PathBuf>,
         #[command(flatten)]
         session_passphrase: SessionPassphraseArgs,
@@ -99,6 +101,8 @@ enum Command {
         #[arg(long)]
         session: PathBuf,
         #[arg(long)]
+        external_id: Option<String>,
+        #[arg(long)]
         patch: Option<PathBuf>,
         #[command(flatten)]
         report: ReportArgs,
@@ -124,6 +128,12 @@ enum Command {
         api_key_env: Option<String>,
         #[arg(long)]
         audit_dir: Option<PathBuf>,
+        #[arg(long)]
+        valkey_url: Option<String>,
+        #[arg(long)]
+        session_ttl_seconds: Option<u64>,
+        #[arg(long)]
+        session_key_prefix: Option<String>,
         #[command(flatten)]
         redaction: RedactionRuleArgs,
         #[command(flatten)]
@@ -310,6 +320,7 @@ pub(crate) fn run() -> Result<()> {
             custom_string_regex_line,
             custom_file,
             source_path,
+            external_id,
             session_out,
             session_passphrase,
         } => {
@@ -328,16 +339,17 @@ pub(crate) fn run() -> Result<()> {
                 .with_custom_strings(custom.custom_strings)
                 .with_custom_files(custom.custom_files);
             policy.validate().map_err(|e| anyhow::anyhow!(e))?;
-            commands::redact::run(
+            commands::redact::run(commands::redact::RedactCommand {
                 input,
                 report,
                 input_kind,
-                resolve_llm_args(llm, &app_config.llm),
+                llm: resolve_llm_args(llm, &app_config.llm),
                 policy,
-                custom.source_path,
+                source_path: custom.source_path,
+                external_id,
                 session_out,
                 session_passphrase,
-            )
+            })
         }
         Command::Detect {
             input,
@@ -381,20 +393,22 @@ pub(crate) fn run() -> Result<()> {
         Command::Restore {
             input,
             session,
+            external_id,
             patch,
             report,
             session_passphrase,
             repo,
             skip_apply_check,
-        } => commands::restore::run(
+        } => commands::restore::run(commands::restore::RestoreCommand {
             input,
             session,
+            external_id,
             patch,
             report,
             session_passphrase,
             repo,
             skip_apply_check,
-        ),
+        }),
         Command::InspectSession { session, report } => {
             commands::inspect_session::run(session, report)
         }
@@ -403,6 +417,9 @@ pub(crate) fn run() -> Result<()> {
             upstream,
             api_key_env,
             audit_dir,
+            valkey_url,
+            session_ttl_seconds,
+            session_key_prefix,
             redaction,
             session_passphrase_env,
         } => {
@@ -429,6 +446,27 @@ pub(crate) fn run() -> Result<()> {
                 {
                     proxy = proxy.with_tls(cert_path, cert_key_path);
                 }
+                let resolved_valkey_url = valkey_url.or(proxy_config.valkey_url);
+                let resolved_session_ttl_seconds =
+                    session_ttl_seconds.or(proxy_config.session_ttl_seconds);
+                let resolved_session_key_prefix =
+                    session_key_prefix.or(proxy_config.session_key_prefix);
+                if let Some(valkey_url) = resolved_valkey_url {
+                    #[cfg(feature = "valkey-session-store")]
+                    {
+                        proxy = proxy.with_valkey_session_store(
+                            &valkey_url,
+                            resolved_session_key_prefix.as_deref(),
+                            resolved_session_ttl_seconds,
+                        )?;
+                    }
+                    #[cfg(not(feature = "valkey-session-store"))]
+                    {
+                        return Err(anyhow::anyhow!(
+                            "valkey session store configuration requires rebuilding with `--features valkey-session-store`"
+                        ));
+                    }
+                }
 
                 runtime.block_on(redactor_http::run_proxy(proxy))?;
                 Ok(())
@@ -440,6 +478,9 @@ pub(crate) fn run() -> Result<()> {
                     upstream,
                     api_key_env,
                     audit_dir,
+                    valkey_url,
+                    session_ttl_seconds,
+                    session_key_prefix,
                     redaction,
                     session_passphrase_env,
                 );

@@ -1,8 +1,11 @@
 use crate::{
     CustomFileRule, CustomStringMatch, CustomStringRule, CustomStringScope, FindingKind, InputKind,
-    RedactionPolicy, Redactor, RedactorBuilder, decrypt_session_from_str,
-    encrypt_session_to_string,
+    RedactionPolicy, Redactor, RedactorBuilder, SessionStore, StoredSession,
+    decrypt_session_from_str, encrypt_session_to_string, redact_text_artifact_with_stateful_session,
+    restore_text_from_store,
 };
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 fn domain_redactor() -> Redactor {
     RedactorBuilder::new()
@@ -42,12 +45,13 @@ const SAMPLE: &str = r#"  nctalk:
 fn redacts_sample_with_structured_tokens() {
     let result = domain_redactor().redact(SAMPLE).expect("redact sample");
 
-    assert!(result.redacted_text.contains("__R_DOMAIN_001__"));
-    assert!(result.redacted_text.contains("__R_DOMAIN_002__"));
-    assert!(result.redacted_text.contains("__R_SECRET_001__"));
-    assert!(result.redacted_text.contains("__R_SECRET_002__"));
-    assert!(result.redacted_text.contains("__R_SECRET_003__"));
-    assert!(result.redacted_text.contains("__R_CIDR_001__"));
+    assert!(result.redacted_text.contains("[[RDX:v2:"));
+    assert!(result.redacted_text.contains(":DOMAIN:001:"));
+    assert!(result.redacted_text.contains(":DOMAIN:002:"));
+    assert!(result.redacted_text.contains(":SECRET:001:"));
+    assert!(result.redacted_text.contains(":SECRET:002:"));
+    assert!(result.redacted_text.contains(":SECRET:003:"));
+    assert!(result.redacted_text.contains(":CIDR:001:"));
     assert!(!result.redacted_text.contains("chat.example.com"));
     assert_eq!(SAMPLE.lines().count(), result.redacted_text.lines().count());
 }
@@ -88,9 +92,7 @@ fn restore_patch_keeps_copied_tokens_restorable() {
 fn altered_token_fails_strict_restore() {
     let redactor = domain_redactor();
     let session = redactor.redact_with_session(SAMPLE).expect("session");
-    let edited = session
-        .redacted_text
-        .replace("__R_SECRET_001__", "__R_SECRET_001_X__");
+    let edited = session.redacted_text.replacen("]]", "_X]]", 1);
 
     let restored = redactor.restore_text(&edited, &session);
 
@@ -106,8 +108,127 @@ fn encrypted_session_round_trip_restores_session() {
     let decrypted = decrypt_session_from_str(&encrypted, "passphrase").expect("decrypt");
 
     assert_eq!(decrypted.session_id, session.session_id);
+    assert_eq!(decrypted.scope_id, session.scope_id);
     assert_eq!(decrypted.redacted_text, session.redacted_text);
     assert_eq!(decrypted.entries.len(), session.entries.len());
+}
+
+#[derive(Debug, Default, Clone)]
+struct MemorySessionStore {
+    sessions: Arc<Mutex<BTreeMap<String, StoredSession>>>,
+}
+
+impl SessionStore for MemorySessionStore {
+    fn load_latest(&self, external_id: &str) -> anyhow::Result<Option<StoredSession>> {
+        Ok(self
+            .sessions
+            .lock()
+            .expect("lock")
+            .get(external_id)
+            .cloned())
+    }
+
+    fn save_latest(
+        &self,
+        external_id: &str,
+        session: &crate::RedactionSession,
+        expected_version: Option<&str>,
+    ) -> anyhow::Result<Option<String>> {
+        let mut sessions = self.sessions.lock().expect("lock");
+        let current = sessions.get(external_id).cloned();
+        match (current.as_ref(), expected_version) {
+            (None, None) => {}
+            (Some(stored), Some(expected)) if stored.version.as_deref() == Some(expected) => {}
+            _ => anyhow::bail!("version_conflict"),
+        }
+        let next_version = current
+            .and_then(|stored| stored.version)
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|value| value + 1)
+            .unwrap_or(1)
+            .to_string();
+        sessions.insert(
+            external_id.to_string(),
+            StoredSession {
+                session: session.clone(),
+                version: Some(next_version.clone()),
+            },
+        );
+        Ok(Some(next_version))
+    }
+}
+
+#[test]
+fn stateful_sessions_reuse_tokens_for_same_external_id() {
+    let redactor = domain_redactor();
+    let store = MemorySessionStore::default();
+    let first = redact_text_artifact_with_stateful_session(
+        &redactor,
+        "host=service.example.com",
+        InputKind::Text,
+        "conv-1",
+        &store,
+    )
+    .expect("first artifact");
+    let second = redact_text_artifact_with_stateful_session(
+        &redactor,
+        "backup=service.example.com",
+        InputKind::Text,
+        "conv-1",
+        &store,
+    )
+    .expect("second artifact");
+
+    assert_eq!(first.session.external_id.as_deref(), Some("conv-1"));
+    assert_eq!(first.session.scope_id, second.session.scope_id);
+    assert_eq!(first.session.entries[0].token, second.session.entries[0].token);
+}
+
+#[test]
+fn stateful_sessions_do_not_share_scope_between_external_ids() {
+    let redactor = domain_redactor();
+    let store = MemorySessionStore::default();
+    let left = redact_text_artifact_with_stateful_session(
+        &redactor,
+        "host=service.example.com",
+        InputKind::Text,
+        "conv-left",
+        &store,
+    )
+    .expect("left artifact");
+    let right = redact_text_artifact_with_stateful_session(
+        &redactor,
+        "host=service.example.com",
+        InputKind::Text,
+        "conv-right",
+        &store,
+    )
+    .expect("right artifact");
+
+    assert_ne!(left.session.scope_id, right.session.scope_id);
+    assert_ne!(left.session.entries[0].token, right.session.entries[0].token);
+}
+
+#[test]
+fn stateful_restore_uses_latest_snapshot() {
+    let redactor = domain_redactor();
+    let store = MemorySessionStore::default();
+    let artifact = redact_text_artifact_with_stateful_session(
+        &redactor,
+        "host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC",
+        InputKind::Text,
+        "conv-restore",
+        &store,
+    )
+    .expect("artifact");
+
+    let restored = restore_text_from_store(&redactor, &artifact.result.redacted_text, "conv-restore", &store)
+        .expect("restore");
+    assert!(restored.is_valid());
+    assert_eq!(
+        restored.restored_text,
+        "host=service.example.com secret=EJ2QEVC6AKELW0k2kkVY4NgGKONC"
+    );
 }
 
 #[test]
@@ -220,9 +341,10 @@ fn git_diff_mode_redacts_hunk_lines_without_touching_headers() {
     );
     assert!(result.redacted_text.contains("--- a/config.yml"));
     assert!(result.redacted_text.contains("+++ b/config.yml"));
-    assert!(result.redacted_text.contains("-API_URL=__R_URL_001__"));
-    assert!(result.redacted_text.contains("+API_URL=__R_URL_002__"));
-    assert!(result.redacted_text.contains("+API_TOKEN=__R_SECRET_001__"));
+    assert!(result.redacted_text.contains("-API_URL=[[RDX:v2:"));
+    assert!(result.redacted_text.contains(":URL:001:"));
+    assert!(result.redacted_text.contains(":URL:002:"));
+    assert!(result.redacted_text.contains(":SECRET:001:"));
     assert!(
         !result
             .redacted_text
@@ -291,7 +413,7 @@ fn git_diff_mode_skips_code_like_secret_assignments() {
             .redacted_text
             .contains("secret_redactions: redacted_diff.replacement_occurrences,")
     );
-    assert!(!result.redacted_text.contains("__R_SECRET_"));
+    assert!(!result.redacted_text.contains("[[RDX:v2:"));
 }
 
 #[test]
@@ -318,7 +440,7 @@ fn git_diff_mode_skips_code_like_domains() {
             .redacted_text
             .contains("for entry in entries.iter() {")
     );
-    assert!(!result.redacted_text.contains("__R_DOMAIN_"));
+    assert!(!result.redacted_text.contains("[[RDX:v2:"));
 }
 
 #[test]
@@ -336,9 +458,10 @@ fn git_diff_mode_keeps_redacting_real_config_values() {
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
-    assert!(result.redacted_text.contains("+API_TOKEN=__R_SECRET_001__"));
-    assert!(result.redacted_text.contains("+API_URL=__R_URL_001__"));
-    assert!(result.redacted_text.contains("+host=__R_DOMAIN_001__"));
+    assert!(result.redacted_text.contains("+API_TOKEN=[[RDX:v2:"));
+    assert!(result.redacted_text.contains(":SECRET:001:"));
+    assert!(result.redacted_text.contains(":URL:001:"));
+    assert!(result.redacted_text.contains(":DOMAIN:001:"));
 }
 
 #[test]
@@ -358,9 +481,9 @@ fn git_diff_mode_redacts_domains_with_psl_suffixes_outside_old_allowlist() {
     assert!(
         result
             .redacted_text
-            .contains("+public_host=__R_DOMAIN_001__")
+            .contains("+public_host=[[RDX:v2:")
     );
-    assert!(result.redacted_text.contains("+edge_host=__R_DOMAIN_002__"));
+    assert!(result.redacted_text.contains(":DOMAIN:002:"));
 }
 
 #[test]
@@ -444,7 +567,7 @@ fn custom_string_exact_match_redacts_pattern() {
         .redact("password=my-secret-key other=my-secret-key")
         .expect("redact");
 
-    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+    assert!(result.redacted_text.contains(":CSTR:001:"));
     assert!(!result.redacted_text.contains("my-secret-key"));
     assert!(result.redacted_text.contains("password="));
     assert!(result.redacted_text.contains("other="));
@@ -462,7 +585,7 @@ fn custom_string_exact_match_finds_substring_occurrences() {
         .redact("prefix_secret_suffix another-secret")
         .expect("redact");
 
-    assert!(result.redacted_text.contains("__R_CSTR_"));
+    assert!(result.redacted_text.contains(":CSTR:"));
 }
 
 #[test]
@@ -475,7 +598,7 @@ fn custom_string_contains_match_is_case_insensitive() {
     let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
     let result = redactor.redact("password=my-secret-KEY").expect("redact");
 
-    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+    assert!(result.redacted_text.contains(":CSTR:001:"));
 }
 
 #[test]
@@ -488,7 +611,7 @@ fn custom_string_regex_match_works() {
     let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
     let result = redactor.redact("deploy project-1234 now").expect("redact");
 
-    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+    assert!(result.redacted_text.contains(":CSTR:001:"));
     assert!(!result.redacted_text.contains("project-1234"));
 }
 
@@ -528,7 +651,7 @@ fn custom_string_line_scope_merges_multiple_matches_on_same_line() {
     let result = redactor.redact(text).expect("redact");
 
     assert_eq!(result.findings.len(), 1);
-    assert!(result.redacted_text.contains("__R_CSTR_001__"));
+    assert!(result.redacted_text.contains(":CSTR:001:"));
 }
 
 #[test]
@@ -546,7 +669,7 @@ fn custom_file_rule_redacts_entire_content_for_matching_source_path() {
         )
         .expect("redact");
 
-    assert!(artifact.result.redacted_text.contains("__R_FILE_001__"));
+    assert!(artifact.result.redacted_text.contains(":FILE:001:"));
     assert!(!artifact.result.redacted_text.contains("localhost"));
     assert!(!artifact.result.redacted_text.contains("admin"));
 
@@ -566,7 +689,7 @@ fn custom_file_rule_does_not_match_different_path() {
         .redact_with_source_path(text, "config/app.yml")
         .expect("redact");
 
-    assert!(!result.redacted_text.contains("__R_FILE_"));
+    assert!(!result.redacted_text.contains(":FILE:"));
 }
 
 #[test]
@@ -588,7 +711,7 @@ fn custom_file_rule_in_git_diff_matches_file_paths() {
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
-    assert!(result.redacted_text.contains("__R_FILE_001__"));
+    assert!(result.redacted_text.contains(":FILE:001:"));
     assert!(!result.redacted_text.contains("postgres://host:5432/mydb"));
 }
 
@@ -611,8 +734,8 @@ fn custom_file_rule_in_git_diff_does_not_match_other_files() {
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
-    assert!(!result.redacted_text.contains("__R_FILE_"));
-    assert!(result.redacted_text.contains("__R_SECRET_001__"));
+    assert!(!result.redacted_text.contains(":FILE:"));
+    assert!(result.redacted_text.contains(":SECRET:001:"));
 }
 
 #[test]

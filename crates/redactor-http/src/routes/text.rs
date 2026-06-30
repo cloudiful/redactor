@@ -6,8 +6,10 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Response, StatusCode};
 use redactor::{
-    RedactorBuilder, inspect_encrypted_session, redact_text_with_encrypted_session,
+    RedactorBuilder, inspect_encrypted_session, redact_text_artifact_with_source_and_stateful_session,
+    redact_text_artifact_with_stateful_session, redact_text_with_encrypted_session,
     redact_text_with_encrypted_session_and_source, restore_text_from_encrypted_session,
+    restore_text_from_store,
 };
 
 use crate::audit::{maybe_write_audit, resolve_service_passphrase};
@@ -17,6 +19,15 @@ use crate::routes::text_models::{
     InspectSessionRequest, RedactTextRequest, RedactTextResponse, RestoreTextRequest,
 };
 use crate::state::ProxyState;
+
+fn require_session_store(
+    state: &ProxyState,
+) -> Result<&dyn redactor::SessionStore> {
+    state
+        .session_store
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("external_id stateful session operations require a configured session store provider"))
+}
 
 pub(crate) async fn redact_text(
     State(state): State<Arc<ProxyState>>,
@@ -50,7 +61,37 @@ async fn redact_text_inner(
 
     let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
 
-    let secured = if let Some(ref source_path) = request.source_path {
+    let secured = if let Some(ref external_id) = request.external_id {
+        let store = require_session_store(&state)?;
+        let artifact = if let Some(ref source_path) = request.source_path {
+            redact_text_artifact_with_source_and_stateful_session(
+                &redactor,
+                &request.text,
+                request.input_kind,
+                source_path,
+                external_id,
+                store,
+            )
+        } else {
+            redact_text_artifact_with_stateful_session(
+                &redactor,
+                &request.text,
+                request.input_kind,
+                external_id,
+                store,
+            )
+        }
+        .context("failed to redact text request")?;
+        let encrypted_session = redactor::encrypt_session_to_string(&artifact.session, passphrase)
+            .context("failed to encrypt redaction session")?;
+        let session_summary = redactor::inspect_encrypted_session(&encrypted_session)
+            .context("failed to inspect encrypted session")?;
+        redactor::EncryptedRedactionArtifact {
+            artifact,
+            encrypted_session,
+            session_summary,
+        }
+    } else if let Some(ref source_path) = request.source_path {
         redact_text_with_encrypted_session_and_source(
             &redactor,
             &request.text,
@@ -94,15 +135,28 @@ async fn restore_text_inner(
     state: Arc<ProxyState>,
     request: RestoreTextRequest,
 ) -> Result<Response<Body>> {
-    let passphrase = resolve_service_passphrase(&state)?;
     let redactor = RedactorBuilder::new().build();
-    let restored = restore_text_from_encrypted_session(
-        &redactor,
-        &request.text,
-        &request.encrypted_session,
-        passphrase,
-    )
-    .context("failed to restore text response")?;
+    let restored = match (
+        request.encrypted_session.as_deref(),
+        request.external_id.as_deref(),
+    ) {
+        (Some(encrypted_session), None) => {
+            let passphrase = resolve_service_passphrase(&state)?;
+            restore_text_from_encrypted_session(&redactor, &request.text, encrypted_session, passphrase)
+                .context("failed to restore text response")?
+        }
+        (None, Some(external_id)) => {
+            let store = require_session_store(&state)?;
+            restore_text_from_store(&redactor, &request.text, external_id, store)
+                .context("failed to restore text response")?
+        }
+        (Some(_), Some(_)) => {
+            anyhow::bail!("restore request must provide either encrypted_session or external_id, not both")
+        }
+        (None, None) => {
+            anyhow::bail!("restore request must provide encrypted_session or external_id")
+        }
+    };
     let payload = serde_json::to_vec(&restored).context("failed to serialize restore response")?;
     Ok(json_response(StatusCode::OK, payload))
 }

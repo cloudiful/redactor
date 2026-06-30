@@ -25,12 +25,12 @@ pub(crate) fn stable_email_alias(value: &str) -> String {
 }
 
 pub(crate) fn stable_url_alias(value: &str) -> String {
-    if let Ok(mut parsed) = Url::parse(value) {
-        if let Some(host) = parsed.host_str() {
-            let replacement = stable_domain_alias(host);
-            if parsed.set_host(Some(&replacement)).is_ok() {
-                return parsed.to_string();
-            }
+    if let Ok(mut parsed) = Url::parse(value)
+        && let Some(host) = parsed.host_str()
+    {
+        let replacement = stable_domain_alias(host);
+        if parsed.set_host(Some(&replacement)).is_ok() {
+            return parsed.to_string();
         }
     }
 

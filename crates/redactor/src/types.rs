@@ -84,31 +84,21 @@ impl RedactionRules {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CustomStringMatch {
+    #[default]
     Exact,
     Contains,
     Regex,
 }
 
-impl Default for CustomStringMatch {
-    fn default() -> Self {
-        Self::Exact
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CustomStringScope {
+    #[default]
     Text,
     Line,
-}
-
-impl Default for CustomStringScope {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,7 +115,7 @@ pub struct CustomFileRule {
     pub path: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RedactionPolicy {
     #[serde(flatten)]
     pub rules: RedactionRules,
@@ -133,16 +123,6 @@ pub struct RedactionPolicy {
     pub custom_strings: Vec<CustomStringRule>,
     #[serde(default)]
     pub custom_files: Vec<CustomFileRule>,
-}
-
-impl Default for RedactionPolicy {
-    fn default() -> Self {
-        Self {
-            rules: RedactionRules::default(),
-            custom_strings: Vec::new(),
-            custom_files: Vec::new(),
-        }
-    }
 }
 
 impl RedactionPolicy {
@@ -181,13 +161,13 @@ impl RedactionPolicy {
                     "custom_strings[{index}]: pattern must not be empty"
                 ));
             }
-            if matches!(rule.match_type, CustomStringMatch::Regex) {
-                if regex::Regex::new(&rule.pattern).is_err() {
-                    return Err(format!(
-                        "custom_strings[{index}]: invalid regex pattern: {}",
-                        rule.pattern
-                    ));
-                }
+            if matches!(rule.match_type, CustomStringMatch::Regex)
+                && regex::Regex::new(&rule.pattern).is_err()
+            {
+                return Err(format!(
+                    "custom_strings[{index}]: invalid regex pattern: {}",
+                    rule.pattern
+                ));
             }
         }
         for (index, rule) in self.custom_files.iter().enumerate() {
@@ -297,6 +277,23 @@ impl FindingKind {
         self.meta().token_label
     }
 
+    pub(crate) fn from_token_label(label: &str) -> Option<Self> {
+        match label {
+            "SECRET" => Some(Self::Secret),
+            "DOMAIN" => Some(Self::Domain),
+            "URL" => Some(Self::Url),
+            "EMAIL" => Some(Self::Email),
+            "IP" => Some(Self::Ip),
+            "CIDR" => Some(Self::Cidr),
+            "PHONE" => Some(Self::Phone),
+            "PERSON" => Some(Self::Person),
+            "ORG" => Some(Self::Organization),
+            "CSTR" => Some(Self::CustomString),
+            "FILE" => Some(Self::CustomFile),
+            _ => None,
+        }
+    }
+
     pub fn priority(self) -> u8 {
         self.meta().priority
     }
@@ -400,6 +397,8 @@ pub struct RestorationEntry {
 pub struct RedactionSession {
     pub version: u32,
     pub session_id: String,
+    pub scope_id: String,
+    pub external_id: Option<String>,
     pub fingerprint: String,
     pub redacted_fingerprint: String,
     pub redacted_text: String,
@@ -434,6 +433,8 @@ pub struct SessionEntrySummary {
 pub struct SessionSummary {
     pub version: u32,
     pub session_id: String,
+    pub scope_id: String,
+    pub external_id: Option<String>,
     pub fingerprint: String,
     pub redacted_fingerprint: String,
     pub entry_count: usize,

@@ -109,10 +109,10 @@ pub(super) fn has_known_host_suffix(value: &str) -> bool {
         return false;
     }
 
-    if let Some(suffix) = psl::suffix(normalized.as_bytes()) {
-        if suffix.is_known() {
-            return true;
-        }
+    if let Some(suffix) = psl::suffix(normalized.as_bytes())
+        && suffix.is_known()
+    {
+        return true;
     }
 
     let Some(suffix) = normalized.rsplit('.').next() else {

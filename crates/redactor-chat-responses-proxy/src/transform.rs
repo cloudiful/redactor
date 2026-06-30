@@ -1,5 +1,6 @@
 use redactor::{
-    RedactionSession, Redactor, RestoreResult, SessionRedactor, restore_text_with_session,
+    RedactionSession, Redactor, RestoreResult, SessionRedactor, SessionStore,
+    restore_text_with_session,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -115,11 +116,25 @@ pub(crate) fn redact_json_request(
     endpoint: ApiEndpoint,
     body: Value,
     redactor: &Redactor,
+    external_id: Option<&str>,
+    session_store: Option<&dyn SessionStore>,
 ) -> Result<JsonRedactionResult, redactor::RedactorError> {
     let original_body = serde_json::to_string(&body)
         .map_err(|error| redactor::RedactorError::Validation(error.to_string()))?;
     let mut body = body;
-    let mut processor = SessionRedactor::new();
+    if let Some(object) = body.as_object_mut() {
+        object.remove("external_id");
+    }
+    let stored_prior = match (external_id, session_store) {
+        (Some(external_id), Some(store)) => store
+            .load_latest(external_id)
+            .map_err(|error| redactor::RedactorError::Validation(error.to_string()))?,
+        _ => None,
+    };
+    let expected_version = stored_prior.as_ref().and_then(|stored| stored.version.clone());
+    let prior_session = stored_prior.map(|stored| stored.session);
+    let mut processor =
+        SessionRedactor::with_prior_session(prior_session.as_ref(), external_id)?;
 
     match endpoint {
         ApiEndpoint::ChatCompletions => redact_chat_request(&mut body, redactor, &mut processor)?,
@@ -129,6 +144,11 @@ pub(crate) fn redact_json_request(
     let redacted_body = serde_json::to_string(&body)
         .map_err(|error| redactor::RedactorError::Validation(error.to_string()))?;
     let session = processor.build_session(&original_body, &redacted_body);
+    if let (Some(external_id), Some(store)) = (external_id, session_store) {
+        store
+            .save_latest(external_id, &session, expected_version.as_deref())
+            .map_err(|error| redactor::RedactorError::Validation(error.to_string()))?;
+    }
     let max_token_len = processor.max_token_len();
 
     Ok(JsonRedactionResult {
@@ -161,8 +181,13 @@ pub(crate) fn restore_json_response(
 
 #[cfg(test)]
 mod tests {
-    use redactor::{FindingKind, RedactionPolicy, Redactor, RedactorBuilder};
+    use redactor::{
+        FindingKind, RedactionPolicy, RedactionSession, Redactor, RedactorBuilder, SessionStore,
+        StoredSession,
+    };
     use serde_json::json;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
 
     use super::{ApiEndpoint, redact_json_request, restore_json_response};
 
@@ -177,6 +202,51 @@ mod tests {
             .build()
     }
 
+    #[derive(Debug, Default, Clone)]
+    struct MemorySessionStore {
+        sessions: Arc<Mutex<BTreeMap<String, StoredSession>>>,
+    }
+
+    impl SessionStore for MemorySessionStore {
+        fn load_latest(&self, external_id: &str) -> anyhow::Result<Option<StoredSession>> {
+            Ok(self
+                .sessions
+                .lock()
+                .expect("lock")
+                .get(external_id)
+                .cloned())
+        }
+
+        fn save_latest(
+            &self,
+            external_id: &str,
+            session: &RedactionSession,
+            expected_version: Option<&str>,
+        ) -> anyhow::Result<Option<String>> {
+            let mut sessions = self.sessions.lock().expect("lock");
+            let current = sessions.get(external_id).cloned();
+            match (current.as_ref(), expected_version) {
+                (None, None) => {}
+                (Some(stored), Some(expected)) if stored.version.as_deref() == Some(expected) => {}
+                _ => anyhow::bail!("version_conflict"),
+            }
+            let next_version = current
+                .and_then(|stored| stored.version)
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|value| value + 1)
+                .unwrap_or(1)
+                .to_string();
+            sessions.insert(
+                external_id.to_string(),
+                StoredSession {
+                    session: session.clone(),
+                    version: Some(next_version.clone()),
+                },
+            );
+            Ok(Some(next_version))
+        }
+    }
+
     #[test]
     fn redacts_chat_request_text_fields() {
         let body = json!({
@@ -187,13 +257,14 @@ mod tests {
             ]
         });
         let redactor = domain_redactor();
-        let result = redact_json_request(ApiEndpoint::ChatCompletions, body, &redactor)
+        let result = redact_json_request(ApiEndpoint::ChatCompletions, body, &redactor, None, None)
             .expect("redact chat request");
 
         let serialized = serde_json::to_string(&result.body).expect("serialize");
-        assert!(serialized.contains("__R_DOMAIN_001__"));
-        assert!(serialized.contains("__R_SECRET_001__"));
-        assert!(result.max_token_len >= "__R_SECRET_001__".len());
+        assert!(serialized.contains("[[RDX:v2:"));
+        assert!(serialized.contains(":DOMAIN:001:"));
+        assert!(serialized.contains(":SECRET:001:"));
+        assert!(result.max_token_len >= "[[RDX:v2:".len());
     }
 
     #[test]
@@ -204,7 +275,8 @@ mod tests {
         });
         let redactor = domain_redactor();
         let redacted =
-            redact_json_request(ApiEndpoint::ChatCompletions, body, &redactor).expect("redact");
+            redact_json_request(ApiEndpoint::ChatCompletions, body, &redactor, None, None)
+                .expect("redact");
         let token = redacted
             .session
             .entries
@@ -242,12 +314,51 @@ mod tests {
             ]
         });
         let redactor = domain_redactor();
-        let result = redact_json_request(ApiEndpoint::Responses, body, &redactor)
+        let result = redact_json_request(ApiEndpoint::Responses, body, &redactor, None, None)
             .expect("redact responses request");
 
         let serialized = serde_json::to_string(&result.body).expect("serialize");
-        assert!(serialized.contains("__R_DOMAIN_001__"));
-        assert!(serialized.contains("__R_SECRET_001__"));
+        assert!(serialized.contains("[[RDX:v2:"));
+        assert!(serialized.contains(":DOMAIN:001:"));
+        assert!(serialized.contains(":SECRET:001:"));
         assert!(serialized.contains("https://example.com/demo.png"));
+    }
+
+    #[test]
+    fn stateful_redaction_reuses_tokens_for_same_external_id() {
+        let store = MemorySessionStore::default();
+        let redactor = domain_redactor();
+        let first = json!({
+            "model": "openrouter/test",
+            "messages": [
+                { "role": "user", "content": "connect service.example.com" }
+            ]
+        });
+        let second = json!({
+            "model": "openrouter/test",
+            "messages": [
+                { "role": "user", "content": "mirror service.example.com" }
+            ]
+        });
+
+        let first = redact_json_request(
+            ApiEndpoint::ChatCompletions,
+            first,
+            &redactor,
+            Some("conv-1"),
+            Some(&store),
+        )
+        .expect("first redaction");
+        let second = redact_json_request(
+            ApiEndpoint::ChatCompletions,
+            second,
+            &redactor,
+            Some("conv-1"),
+            Some(&store),
+        )
+        .expect("second redaction");
+
+        assert_eq!(first.session.scope_id, second.session.scope_id);
+        assert_eq!(first.session.entries[0].token, second.session.entries[0].token);
     }
 }

@@ -88,7 +88,7 @@ fn redact_git_diff_preserves_patch_shape_and_reports_stats() {
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("\"redacted_text\""));
     assert!(stdout.contains("diff --git a/.env b/.env"));
-    assert!(stdout.contains("+API_TOKEN=__R_SECRET_001__"));
+    assert!(stdout.contains("+API_TOKEN=[[RDX:v2:"));
     assert!(stdout.contains("\"stats\""));
     assert!(stdout.contains("\"llm_configured\": false"));
     let _ = fs::remove_file(input);

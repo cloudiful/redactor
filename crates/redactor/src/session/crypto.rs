@@ -9,12 +9,14 @@ use sha2::Sha256;
 use crate::types::{RedactionSession, SessionEntrySummary};
 
 const KDF_ROUNDS: u32 = 600_000;
-const SESSION_VERSION: u32 = 1;
+const SESSION_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct EncryptedSessionFile {
     pub(crate) version: u32,
     pub(crate) session_id: String,
+    pub(crate) scope_id: String,
+    pub(crate) external_id: Option<String>,
     pub(crate) fingerprint: String,
     pub(crate) redacted_fingerprint: String,
     pub(crate) entry_count: usize,
@@ -43,6 +45,8 @@ pub fn encrypt_session_to_string(session: &RedactionSession, passphrase: &str) -
     let envelope = EncryptedSessionFile {
         version: SESSION_VERSION,
         session_id: session.session_id.clone(),
+        scope_id: session.scope_id.clone(),
+        external_id: session.external_id.clone(),
         fingerprint: session.fingerprint.clone(),
         redacted_fingerprint: session.redacted_fingerprint.clone(),
         entry_count: session.entries.len(),
@@ -67,6 +71,13 @@ pub fn encrypt_session_to_string(session: &RedactionSession, passphrase: &str) -
 
 pub fn decrypt_session_from_str(data: &str, passphrase: &str) -> Result<RedactionSession> {
     let envelope = parse_envelope(data)?;
+    if envelope.version != SESSION_VERSION {
+        return Err(anyhow!(
+            "unsupported encrypted session version {}, expected {}",
+            envelope.version,
+            SESSION_VERSION
+        ));
+    }
     let salt = decode_exact::<16>(&envelope.salt_b64).context("invalid encrypted session salt")?;
     let nonce =
         decode_exact::<12>(&envelope.nonce_b64).context("invalid encrypted session nonce")?;

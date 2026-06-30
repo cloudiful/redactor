@@ -107,19 +107,40 @@ impl Redactor {
         input_kind: InputKind,
         source_path: Option<&str>,
     ) -> Result<RedactionArtifact, RedactorError> {
+        self.redact_artifact_with_input_kind_source_and_prior_session(
+            text,
+            input_kind,
+            source_path,
+            None,
+            None,
+        )
+    }
+
+    pub fn redact_artifact_with_input_kind_source_and_prior_session(
+        &self,
+        text: &str,
+        input_kind: InputKind,
+        source_path: Option<&str>,
+        prior_session: Option<&RedactionSession>,
+        external_id: Option<&str>,
+    ) -> Result<RedactionArtifact, RedactorError> {
         let outcome = detect_internal(self, text, input_kind, source_path);
         let findings = outcome.findings;
-        let output = crate::replace::apply_replacements(text, &findings, &self.policy);
+        let mut processor =
+            crate::replace::ReplacementProcessor::with_prior_session(prior_session, external_id)?;
+        let redacted_text = processor.redact_fragment(text, &findings);
+        let session = processor.build_session(text, &redacted_text, &self.policy);
+        let applied_replacements = processor.into_applied_replacements();
         let stats = stats_for(self.llm.is_some(), &findings, outcome.stats);
 
         Ok(RedactionArtifact {
             result: RedactionResult {
-                redacted_text: output.redacted_text,
+                redacted_text: redacted_text.clone(),
                 findings,
-                applied_replacements: output.applied_replacements,
+                applied_replacements,
                 stats,
             },
-            session: output.session,
+            session,
         })
     }
 
@@ -164,11 +185,39 @@ impl Redactor {
     pub fn restore_patch(&self, patch: &str, session: &RedactionSession) -> RestoreResult {
         restore_patch_with_session(patch, session)
     }
+
+    pub fn redact_artifact_with_prior_session(
+        &self,
+        text: &str,
+        input_kind: InputKind,
+        prior_session: Option<&RedactionSession>,
+        external_id: Option<&str>,
+    ) -> Result<RedactionArtifact, RedactorError> {
+        self.redact_artifact_with_input_kind_source_and_prior_session(
+            text,
+            input_kind,
+            None,
+            prior_session,
+            external_id,
+        )
+    }
 }
 
 impl SessionRedactor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_prior_session(
+        prior_session: Option<&RedactionSession>,
+        external_id: Option<&str>,
+    ) -> Result<Self, RedactorError> {
+        Ok(Self {
+            processor: crate::replace::ReplacementProcessor::with_prior_session(
+                prior_session,
+                external_id,
+            )?,
+        })
     }
 
     pub fn redact_fragment(
