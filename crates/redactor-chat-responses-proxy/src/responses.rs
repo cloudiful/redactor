@@ -1,7 +1,7 @@
 use redactor::{Redactor, SessionRedactor};
 use serde_json::Value;
 
-use super::transform::{redact_string_value, walk_nested_content};
+use crate::transform::{redact_string_value, walk_nested_content};
 
 pub(crate) fn redact_responses_request(
     body: &mut Value,

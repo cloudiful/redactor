@@ -88,7 +88,11 @@ fn is_substantial_ipv6(value: &str) -> bool {
         return true;
     }
 
-    value.split(':').filter(|segment| !segment.is_empty()).count() >= 4
+    value
+        .split(':')
+        .filter(|segment| !segment.is_empty())
+        .count()
+        >= 4
 }
 
 pub(crate) fn is_email_local(ch: char) -> bool {

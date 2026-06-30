@@ -1,7 +1,7 @@
 use redactor::{Redactor, SessionRedactor};
 use serde_json::Value;
 
-use super::transform::{redact_string_value, redact_text_array_parts};
+use crate::transform::{redact_string_value, redact_text_array_parts};
 
 pub(crate) fn redact_chat_request(
     body: &mut Value,

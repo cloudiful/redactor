@@ -26,3 +26,4 @@ optional = true
 default = []
 ollama = ["redactor/ollama"]
 proxy = ["dep:redactor-http", "dep:tokio"]
+chat-responses-proxy = ["redactor-http/chat-responses-proxy"]

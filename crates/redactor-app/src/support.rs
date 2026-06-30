@@ -26,7 +26,9 @@ pub(crate) fn resolve_redaction_policy(
         cidr: overrides.cidr.unwrap_or(defaults.rules.cidr),
         phone: overrides.phone.unwrap_or(defaults.rules.phone),
         person: overrides.person.unwrap_or(defaults.rules.person),
-        organization: overrides.organization.unwrap_or(defaults.rules.organization),
+        organization: overrides
+            .organization
+            .unwrap_or(defaults.rules.organization),
     };
     RedactionPolicy {
         rules,

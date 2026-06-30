@@ -101,8 +101,8 @@ mod tests {
         redact_text_artifact, redact_text_with_encrypted_session,
         restore_text_from_encrypted_session,
     };
-    use crate::{InputKind, RedactionPolicy, RedactorBuilder};
     use crate::types::FindingKind;
+    use crate::{InputKind, RedactionPolicy, RedactorBuilder};
 
     fn full_redactor() -> crate::Redactor {
         RedactorBuilder::new()

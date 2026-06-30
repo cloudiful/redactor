@@ -81,8 +81,11 @@ impl Redactor {
         text: &str,
         source_path: &str,
     ) -> Result<RedactionResult, RedactorError> {
-        let artifact =
-            self.redact_artifact_with_input_kind_and_source(text, InputKind::Text, Some(source_path))?;
+        let artifact = self.redact_artifact_with_input_kind_and_source(
+            text,
+            InputKind::Text,
+            Some(source_path),
+        )?;
         Ok(artifact.result)
     }
 
@@ -151,8 +154,7 @@ impl Redactor {
         text: &str,
         source_path: &str,
     ) -> Result<Vec<Finding>, RedactorError> {
-        Ok(detect_internal(self, text, InputKind::Text, Some(source_path))
-            .findings)
+        Ok(detect_internal(self, text, InputKind::Text, Some(source_path)).findings)
     }
 
     pub fn restore_text(&self, text: &str, session: &RedactionSession) -> RestoreResult {

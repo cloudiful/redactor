@@ -37,14 +37,18 @@ async fn redact_text_inner(
     request: RedactTextRequest,
 ) -> Result<Response<Body>> {
     let passphrase = resolve_service_passphrase(&state)?;
-    let policy = request.redaction.unwrap_or_else(|| state.redaction_policy.clone());
+    let policy = request
+        .redaction
+        .unwrap_or_else(|| state.redaction_policy.clone());
     if let Err(e) = policy.validate() {
-        return Ok(error_response(StatusCode::BAD_REQUEST, e, "invalid_redaction_policy"));
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            e,
+            "invalid_redaction_policy",
+        ));
     }
 
-    let redactor = RedactorBuilder::new()
-        .with_redaction_policy(policy)
-        .build();
+    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
 
     let secured = if let Some(ref source_path) = request.source_path {
         redact_text_with_encrypted_session_and_source(
@@ -56,13 +60,8 @@ async fn redact_text_inner(
         )
         .context("failed to redact text request")?
     } else {
-        redact_text_with_encrypted_session(
-            &redactor,
-            &request.text,
-            request.input_kind,
-            passphrase,
-        )
-        .context("failed to redact text request")?
+        redact_text_with_encrypted_session(&redactor, &request.text, request.input_kind, passphrase)
+            .context("failed to redact text request")?
     };
 
     maybe_write_audit(&state, &secured.artifact.session)?;

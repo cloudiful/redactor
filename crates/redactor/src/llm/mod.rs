@@ -267,7 +267,9 @@ mod tests {
         let findings = parse_candidates(
             text,
             content,
-            RedactionRules::default().with_kind(FindingKind::Person, true).with_kind(FindingKind::Organization, true),
+            RedactionRules::default()
+                .with_kind(FindingKind::Person, true)
+                .with_kind(FindingKind::Organization, true),
         )
         .expect("parse candidates");
         let spans = findings
@@ -325,7 +327,9 @@ mod tests {
         let findings = parse_candidates(
             text,
             content,
-            RedactionRules::default().with_kind(FindingKind::Person, true).with_kind(FindingKind::Organization, true),
+            RedactionRules::default()
+                .with_kind(FindingKind::Person, true)
+                .with_kind(FindingKind::Organization, true),
         )
         .expect("parse candidates");
         let spans = findings

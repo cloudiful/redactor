@@ -4,25 +4,26 @@ use redactor::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::chat::redact_chat_request;
-use super::responses::redact_responses_request;
+use crate::chat_completions::redact_chat_request;
+use crate::responses::redact_responses_request;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ApiEndpoint {
+pub(crate) enum ApiEndpoint {
     ChatCompletions,
     Responses,
 }
 
 #[derive(Debug, Clone)]
-pub struct JsonRedactionResult {
+pub(crate) struct JsonRedactionResult {
     pub body: Value,
     pub session: RedactionSession,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub max_token_len: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct JsonRestoreResult {
+pub(crate) struct JsonRestoreResult {
     pub body: Value,
     pub report: RestoreResult,
 }
@@ -110,7 +111,7 @@ pub(crate) fn walk_nested_content(
     Ok(())
 }
 
-pub fn redact_json_request(
+pub(crate) fn redact_json_request(
     endpoint: ApiEndpoint,
     body: Value,
     redactor: &Redactor,
@@ -137,7 +138,7 @@ pub fn redact_json_request(
     })
 }
 
-pub fn restore_json_response(
+pub(crate) fn restore_json_response(
     body: Value,
     session: &RedactionSession,
 ) -> Result<JsonRestoreResult, redactor::RedactorError> {
@@ -162,8 +163,6 @@ pub fn restore_json_response(
 mod tests {
     use redactor::{FindingKind, RedactionPolicy, Redactor, RedactorBuilder};
     use serde_json::json;
-
-    use crate::stream::SseRestoreBuffer;
 
     use super::{ApiEndpoint, redact_json_request, restore_json_response};
 
@@ -250,25 +249,5 @@ mod tests {
         assert!(serialized.contains("__R_DOMAIN_001__"));
         assert!(serialized.contains("__R_SECRET_001__"));
         assert!(serialized.contains("https://example.com/demo.png"));
-    }
-
-    #[test]
-    fn sse_restore_buffer_handles_split_tokens() {
-        let redactor = domain_redactor();
-        let session = redactor
-            .redact_with_session("domain=service.example.com")
-            .expect("session");
-        let token = session.entries[0].token.clone();
-        let mut buffer = SseRestoreBuffer::new(session);
-        let first = buffer
-            .push(&format!("data: {{\"delta\":\"{}", &token[..8]))
-            .expect("first push");
-        let second = buffer
-            .push(&(token[8..].to_string() + "\"}\n\n"))
-            .expect("second push");
-        let tail = buffer.finish().expect("finish");
-        let combined = format!("{first}{second}{tail}");
-
-        assert!(combined.contains("service.example.com"));
     }
 }

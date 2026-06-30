@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 use crate::types::{
-    AppliedReplacement, Finding, FindingKind, RedactionPolicy, RedactionSession, ReplacementStrategy,
-    RestorationEntry,
+    AppliedReplacement, Finding, FindingKind, RedactionPolicy, RedactionSession,
+    ReplacementStrategy, RestorationEntry,
 };
 
 use super::hints::display_hint;

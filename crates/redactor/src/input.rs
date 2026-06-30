@@ -107,7 +107,10 @@ fn git_diff_redactable_ranges(text: &str) -> Vec<RedactableRange> {
 fn parse_diff_git_path(line: &str) -> Option<String> {
     let rest = line.strip_prefix("diff --git ")?;
     let path_part = rest.split_whitespace().next()?;
-    let path = path_part.strip_prefix("a/").unwrap_or(path_part).to_string();
+    let path = path_part
+        .strip_prefix("a/")
+        .unwrap_or(path_part)
+        .to_string();
     Some(path)
 }
 
@@ -119,7 +122,10 @@ fn parse_diff_path_line(line: &str) -> Option<String> {
     } else {
         return None;
     };
-    let path = rest.strip_prefix("b/").or_else(|| rest.strip_prefix("a/")).unwrap_or(rest);
+    let path = rest
+        .strip_prefix("b/")
+        .or_else(|| rest.strip_prefix("a/"))
+        .unwrap_or(rest);
     let path = path.trim();
     if path.is_empty() || path == "/dev/null" {
         return None;
@@ -189,9 +195,6 @@ mod tests {
 
         let ranges = redactable_ranges(diff, InputKind::GitDiff, None);
         assert_eq!(ranges.len(), 1);
-        assert_eq!(
-            ranges[0].file_path.as_deref(),
-            Some("app/config.yml")
-        );
+        assert_eq!(ranges[0].file_path.as_deref(), Some("app/config.yml"));
     }
 }

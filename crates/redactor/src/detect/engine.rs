@@ -1,12 +1,12 @@
 use crate::input::RedactableRange;
-use crate::types::{Finding, RedactionRules, RedactionPolicy};
+use crate::types::{Finding, RedactionPolicy, RedactionRules};
 
 use super::contextual::{detect_contextual_assignments, propagate_repeated_secrets};
-use super::custom::{detect_custom_strings, detect_custom_files};
+use super::custom::{detect_custom_files, detect_custom_strings};
 use super::regexes::{cidr_regex, ip_regex, secret_regex, url_regex};
 use super::scanners::{detect_domains, detect_emails, detect_pattern, detect_phones};
-use super::validators::{is_valid_cidr, is_valid_ip, looks_like_secret};
 use super::select_non_overlapping;
+use super::validators::{is_valid_cidr, is_valid_ip, looks_like_secret};
 
 pub(crate) struct PolicyDetectionResult {
     pub findings: Vec<Finding>,

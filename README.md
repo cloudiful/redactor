@@ -5,7 +5,8 @@
 The publishable library crate is [`cloudiful-redactor`](https://crates.io/crates/cloudiful-redactor). The workspace also contains:
 
 - `redactor-app`: CLI and local tooling
-- `redactor-http`: HTTP proxy and text redaction endpoints
+- `redactor-http`: HTTP service host for text redaction endpoints and optional proxy routes
+- `redactor-chat-responses-proxy`: internal chat/responses proxy crate behind an opt-in Cargo feature
 
 ## Public crate
 
@@ -39,6 +40,22 @@ For reversible redaction, use the session-based APIs:
 - `Redactor::redact_with_session`
 - `restore_text_with_session`
 - `restore_patch_with_session`
+
+## Proxy feature matrix
+
+`redactor-app` keeps proxy support split into two Cargo features:
+
+- `proxy`: starts HTTP service, enables `/redact/text`, `/restore/text`, and `/inspect/session`
+- `chat-responses-proxy`: re-enables `/v1/chat/completions` and `/v1/responses` redaction proxying when combined with `proxy`
+
+Build commands:
+
+```bash
+cargo run -p redactor-app --no-default-features --features proxy -- proxy
+cargo run -p redactor-app --no-default-features --features "proxy chat-responses-proxy" -- proxy
+```
+
+When built with only `proxy`, the chat/responses routes stay registered but return `501 Not Implemented` with a feature-disabled error payload.
 
 ## Release flows
 

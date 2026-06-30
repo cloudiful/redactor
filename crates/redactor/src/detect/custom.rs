@@ -1,14 +1,14 @@
 use regex::Regex;
 use std::collections::BTreeMap;
 
-use crate::types::{CustomFileRule, CustomStringMatch, CustomStringRule, CustomStringScope, Finding, FindingKind, FindingSource};
+use crate::types::{
+    CustomFileRule, CustomStringMatch, CustomStringRule, CustomStringScope, Finding, FindingKind,
+    FindingSource,
+};
 
 use super::validators::normalize;
 
-pub(crate) fn detect_custom_strings(
-    text: &str,
-    rules: &[CustomStringRule],
-) -> Vec<Finding> {
+pub(crate) fn detect_custom_strings(text: &str, rules: &[CustomStringRule]) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut line_matches = BTreeMap::<(usize, usize), Finding>::new();
     for rule in rules {
@@ -78,10 +78,7 @@ fn push_custom_string_finding(
     let (finding_start, finding_end, finding_text) = match rule.scope {
         CustomStringScope::Text => (start, end, match_text.to_string()),
         CustomStringScope::Line => {
-            let line_start = text[..start]
-                .rfind('\n')
-                .map(|i| i + 1)
-                .unwrap_or(0);
+            let line_start = text[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
             let line_end = text[end..]
                 .find('\n')
                 .map(|i| end + i)

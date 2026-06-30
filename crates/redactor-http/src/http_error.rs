@@ -32,13 +32,3 @@ pub(crate) fn error_response(
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     response
 }
-
-pub(crate) fn sse_error_event(message: &str) -> String {
-    let escaped = serde_json::json!({
-        "error": {
-            "message": message,
-            "kind": "restore_error"
-        }
-    });
-    format!("event: error\ndata: {}\n\n", escaped)
-}

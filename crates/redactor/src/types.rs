@@ -161,7 +161,10 @@ impl RedactionPolicy {
         self
     }
 
-    pub fn with_custom_strings<I: IntoIterator<Item = CustomStringRule>>(mut self, rules: I) -> Self {
+    pub fn with_custom_strings<I: IntoIterator<Item = CustomStringRule>>(
+        mut self,
+        rules: I,
+    ) -> Self {
         self.custom_strings.extend(rules);
         self
     }
@@ -189,9 +192,7 @@ impl RedactionPolicy {
         }
         for (index, rule) in self.custom_files.iter().enumerate() {
             if rule.path.is_empty() {
-                return Err(format!(
-                    "custom_files[{index}]: path must not be empty"
-                ));
+                return Err(format!("custom_files[{index}]: path must not be empty"));
             }
         }
         Ok(())

@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/redactor", "crates/redactor-http", "crates/redactor-app"]
-default-members = ["crates/redactor", "crates/redactor-http", "crates/redactor-app"]
+members = ["crates/redactor", "crates/redactor-http", "crates/redactor-app", "crates/redactor-chat-responses-proxy"]
+default-members = ["crates/redactor", "crates/redactor-http", "crates/redactor-app", "crates/redactor-chat-responses-proxy"]
 resolver = "2"
 
 [workspace.package]
@@ -11,23 +11,23 @@ repository = "https://github.com/cloudiful/redactor"
 
 [workspace.dependencies]
 aes-gcm-siv = "0.11.1"
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 async-stream = "0.3.6"
 axum = "0.8.9"
 base64 = "0.22.1"
 clap = { version = "4.6.1", features = [ "derive" ] }
-config = {package = "cloudiful-config" , version = "0.6.2" }
+config = {package = "cloudiful-config" , version = "0.6.3" }
 futures-util = "0.3.32"
-getrandom = "0.4.2"
+getrandom = "0.4.3"
 hex = "0.4.3"
 ipnet = "2.12.0"
 pbkdf2 = "0.13.0"
-psl = "2.1.210"
-regex = "1.12.3"
-reqwest = { version = "0.13.3", default-features = false, features = [ "blocking", "json", "rustls", "stream" ] }
+psl = "2.1.215"
+regex = "1.12.4"
+reqwest = { version = "0.13.4", default-features = false, features = [ "blocking", "json", "rustls", "stream" ] }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-server = { package = "cloudiful-server", version = "0.2.4", default-features = false, features = ["axum"] }
+serde_json = "1.0.150"
+server = { package = "cloudiful-server", version = "0.2.6", default-features = false, features = ["axum"] }
 sha2 = "0.11.0"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = [ "macros", "rt-multi-thread", "signal", "net" ] }

@@ -453,7 +453,10 @@ pub(crate) fn run() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, DEFAULT_CONFIG_PATH, DEFAULT_SESSION_PASSPHRASE_ENV, InputKindArg, ReportFormat};
+    use super::{
+        Cli, Command, DEFAULT_CONFIG_PATH, DEFAULT_SESSION_PASSPHRASE_ENV, InputKindArg,
+        ReportFormat,
+    };
     use clap::{CommandFactory, Parser};
     use std::path::PathBuf;
 

@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use redactor::RedactionPolicy;
+#[cfg(feature = "chat-responses-proxy")]
+use redactor_chat_responses_proxy::ChatResponsesProxyContext;
 use reqwest::Client;
 use server::{CorsConfig, ServerConfig, TlsConfig, ValidatedServerConfig};
 use std::env;
@@ -106,12 +108,15 @@ impl ProxyConfig {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProxyState {
+    #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
     pub(crate) upstream: String,
+    #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
     pub(crate) api_key_env: Option<String>,
     pub(crate) audit_dir: Option<PathBuf>,
     pub(crate) session_passphrase_env: String,
     pub(crate) session_passphrase: Option<String>,
     pub(crate) redaction_policy: RedactionPolicy,
+    #[cfg_attr(not(feature = "chat-responses-proxy"), allow(dead_code))]
     pub(crate) client: Client,
 }
 
@@ -133,5 +138,18 @@ impl ProxyState {
                 .build()
                 .context("failed to construct proxy HTTP client")?,
         }))
+    }
+
+    #[cfg(feature = "chat-responses-proxy")]
+    pub(crate) fn chat_responses_proxy_context(&self) -> ChatResponsesProxyContext {
+        ChatResponsesProxyContext::new(
+            self.upstream.clone(),
+            self.api_key_env.clone(),
+            self.audit_dir.clone(),
+            self.session_passphrase_env.clone(),
+            self.session_passphrase.clone(),
+            self.redaction_policy.clone(),
+            self.client.clone(),
+        )
     }
 }

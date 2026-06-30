@@ -1,4 +1,4 @@
-use crate::http_error::sse_error_event;
+use crate::http::sse_error_event;
 use async_stream::stream;
 use axum::body::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -60,23 +60,23 @@ impl SseRestoreBuffer {
     }
 }
 
-pub(crate) type StreamRestoreStep = Result<Option<Bytes>, Bytes>;
+type StreamRestoreStep = Result<Option<Bytes>, Bytes>;
 
 #[derive(Debug)]
-pub(crate) struct SseStreamRestorer {
+struct SseStreamRestorer {
     utf8: Utf8ChunkDecoder,
     restorer: SseRestoreBuffer,
 }
 
 impl SseStreamRestorer {
-    pub(crate) fn new(session: RedactionSession) -> Self {
+    fn new(session: RedactionSession) -> Self {
         Self {
             utf8: Utf8ChunkDecoder::default(),
             restorer: SseRestoreBuffer::new(session),
         }
     }
 
-    pub(crate) fn push_bytes(&mut self, bytes: &[u8]) -> StreamRestoreStep {
+    fn push_bytes(&mut self, bytes: &[u8]) -> StreamRestoreStep {
         match self.utf8.push(bytes) {
             Ok(Some(text)) => self.restore_fragment(&text),
             Ok(None) => Ok(None),
@@ -84,7 +84,7 @@ impl SseStreamRestorer {
         }
     }
 
-    pub(crate) fn flush_decoder(&mut self) -> StreamRestoreStep {
+    fn flush_decoder(&mut self) -> StreamRestoreStep {
         match self.utf8.finish() {
             Ok(Some(text)) => self.restore_fragment(&text),
             Ok(None) => Ok(None),
@@ -92,7 +92,7 @@ impl SseStreamRestorer {
         }
     }
 
-    pub(crate) fn finish(&mut self) -> StreamRestoreStep {
+    fn finish(&mut self) -> StreamRestoreStep {
         Self::restore_result(self.restorer.finish())
     }
 
@@ -200,8 +200,30 @@ impl Utf8ChunkDecoder {
 
 #[cfg(test)]
 mod tests {
-    use super::SseStreamRestorer;
+    use super::{SseRestoreBuffer, SseStreamRestorer};
     use redactor::{FindingKind, RedactionPolicy, RedactorBuilder};
+
+    #[test]
+    fn sse_restore_buffer_handles_split_tokens() {
+        let redactor = RedactorBuilder::new()
+            .with_redaction_policy(RedactionPolicy::default().with_kind(FindingKind::Domain, true))
+            .build();
+        let session = redactor
+            .redact_with_session("domain=service.example.com")
+            .expect("session");
+        let token = session.entries[0].token.clone();
+        let mut buffer = SseRestoreBuffer::new(session);
+        let first = buffer
+            .push(&format!("data: {{\"delta\":\"{}", &token[..8]))
+            .expect("first push");
+        let second = buffer
+            .push(&(token[8..].to_string() + "\"}\n\n"))
+            .expect("second push");
+        let tail = buffer.finish().expect("finish");
+        let combined = format!("{first}{second}{tail}");
+
+        assert!(combined.contains("service.example.com"));
+    }
 
     #[test]
     fn stream_restorer_emits_sse_error_for_invalid_token() {
