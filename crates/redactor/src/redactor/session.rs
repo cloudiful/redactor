@@ -9,6 +9,12 @@ pub(super) trait SessionRedactorExt {
         redactor: &Redactor,
         text: &str,
     ) -> Result<String, RedactorError>;
+    fn redact_text_fragment_with_input_kind(
+        &mut self,
+        redactor: &Redactor,
+        text: &str,
+        input_kind: InputKind,
+    ) -> Result<String, RedactorError>;
     fn build_redaction_session(
         &self,
         original_text: &str,
@@ -24,7 +30,16 @@ impl SessionRedactorExt for SessionRedactor {
         redactor: &Redactor,
         text: &str,
     ) -> Result<String, RedactorError> {
-        let findings = redactor.detect_with_input_kind(text, InputKind::Text)?;
+        self.redact_text_fragment_with_input_kind(redactor, text, InputKind::Text)
+    }
+
+    fn redact_text_fragment_with_input_kind(
+        &mut self,
+        redactor: &Redactor,
+        text: &str,
+        input_kind: InputKind,
+    ) -> Result<String, RedactorError> {
+        let findings = redactor.detect_with_input_kind(text, input_kind)?;
         Ok(self.processor.redact_fragment(text, &findings))
     }
 

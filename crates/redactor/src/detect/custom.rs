@@ -1,4 +1,4 @@
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use std::collections::BTreeMap;
 
 use crate::types::{
@@ -8,62 +8,121 @@ use crate::types::{
 
 use super::validators::normalize;
 
-pub(crate) fn detect_custom_strings(text: &str, rules: &[CustomStringRule]) -> Vec<Finding> {
+#[derive(Debug)]
+struct CompiledRule {
+    rule: CustomStringRule,
+    regex: Regex,
+}
+
+#[derive(Debug, Default)]
+struct CompiledRuleSet {
+    set: Option<RegexSet>,
+    rules: Vec<CompiledRule>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CompiledCustomStrings {
+    exact: CompiledRuleSet,
+    contains: CompiledRuleSet,
+    regex: Vec<CompiledRule>,
+}
+
+impl CompiledCustomStrings {
+    pub(crate) fn new(rules: &[CustomStringRule]) -> Self {
+        let exact = compile_rule_set(rules, CustomStringMatch::Exact, |pattern| {
+            regex::escape(pattern)
+        });
+        let contains = compile_rule_set(rules, CustomStringMatch::Contains, |pattern| {
+            format!("(?i:{})", regex::escape(pattern))
+        });
+        let regex = rules
+            .iter()
+            .filter(|rule| rule.match_type == CustomStringMatch::Regex)
+            .filter_map(|rule| {
+                Regex::new(&rule.pattern).ok().map(|regex| CompiledRule {
+                    rule: rule.clone(),
+                    regex,
+                })
+            })
+            .collect();
+        Self {
+            exact,
+            contains,
+            regex,
+        }
+    }
+}
+
+fn compile_rule_set(
+    rules: &[CustomStringRule],
+    match_type: CustomStringMatch,
+    pattern_for: impl Fn(&str) -> String,
+) -> CompiledRuleSet {
+    let compiled = rules
+        .iter()
+        .filter(|rule| rule.match_type == match_type)
+        .filter_map(|rule| {
+            let pattern = pattern_for(&rule.pattern);
+            Regex::new(&pattern).ok().map(|regex| CompiledRule {
+                rule: rule.clone(),
+                regex,
+            })
+        })
+        .collect::<Vec<_>>();
+    let set = (!compiled.is_empty())
+        .then(|| RegexSet::new(compiled.iter().map(|rule| rule.regex.as_str())).ok())
+        .flatten();
+    CompiledRuleSet {
+        set,
+        rules: compiled,
+    }
+}
+
+pub(crate) fn detect_custom_strings(text: &str, compiled: &CompiledCustomStrings) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut line_matches = BTreeMap::<(usize, usize), Finding>::new();
-    for rule in rules {
-        match rule.match_type {
-            CustomStringMatch::Exact => {
-                let pattern = regex::escape(&rule.pattern);
-                if let Ok(re) = Regex::new(&pattern) {
-                    for mat in re.find_iter(text) {
-                        push_custom_string_finding(
-                            &mut findings,
-                            &mut line_matches,
-                            text,
-                            mat.start(),
-                            mat.end(),
-                            mat.as_str(),
-                            rule,
-                        );
-                    }
-                }
-            }
-            CustomStringMatch::Contains => {
-                let pattern = regex::escape(&rule.pattern);
-                if let Ok(re) = Regex::new(&format!("(?i){pattern}")) {
-                    for mat in re.find_iter(text) {
-                        push_custom_string_finding(
-                            &mut findings,
-                            &mut line_matches,
-                            text,
-                            mat.start(),
-                            mat.end(),
-                            mat.as_str(),
-                            rule,
-                        );
-                    }
-                }
-            }
-            CustomStringMatch::Regex => {
-                if let Ok(re) = Regex::new(&rule.pattern) {
-                    for mat in re.find_iter(text) {
-                        push_custom_string_finding(
-                            &mut findings,
-                            &mut line_matches,
-                            text,
-                            mat.start(),
-                            mat.end(),
-                            mat.as_str(),
-                            rule,
-                        );
-                    }
-                }
-            }
-        }
+    detect_rule_set(text, &compiled.exact, &mut findings, &mut line_matches);
+    detect_rule_set(text, &compiled.contains, &mut findings, &mut line_matches);
+    for compiled_rule in &compiled.regex {
+        push_rule_matches(text, compiled_rule, &mut findings, &mut line_matches);
     }
     findings.extend(line_matches.into_values());
     findings
+}
+
+fn detect_rule_set(
+    text: &str,
+    compiled: &CompiledRuleSet,
+    findings: &mut Vec<Finding>,
+    line_matches: &mut BTreeMap<(usize, usize), Finding>,
+) {
+    let Some(set) = &compiled.set else {
+        return;
+    };
+    for index in set.matches(text).iter() {
+        if let Some(rule) = compiled.rules.get(index) {
+            push_rule_matches(text, rule, findings, line_matches);
+        }
+    }
+}
+
+fn push_rule_matches(
+    text: &str,
+    compiled: &CompiledRule,
+    findings: &mut Vec<Finding>,
+    line_matches: &mut BTreeMap<(usize, usize), Finding>,
+) {
+    for mat in compiled.regex.find_iter(text) {
+        push_custom_string_finding(
+            findings,
+            line_matches,
+            text,
+            mat.start(),
+            mat.end(),
+            mat.as_str(),
+            &compiled.rule,
+        );
+    }
 }
 
 fn push_custom_string_finding(

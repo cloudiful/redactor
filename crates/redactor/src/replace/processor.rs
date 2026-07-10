@@ -1,16 +1,14 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
+use crate::RedactorError;
 use crate::types::{
     AppliedReplacement, Finding, FindingKind, RedactionPolicy, RedactionSession,
     ReplacementStrategy, RestorationEntry,
 };
-use crate::RedactorError;
 
 use super::hints::display_hint;
-use super::{
-    format_token, parse_token, random_id, random_scope_id, sha256_hex,
-};
+use super::{format_token, parse_token, random_id, random_scope_id, sha256_hex};
 
 #[derive(Debug, Clone)]
 struct Allocation {
@@ -132,6 +130,10 @@ impl ReplacementProcessor {
             .map(|allocation| allocation.token.len())
             .max()
             .unwrap_or(0)
+    }
+
+    pub(crate) fn has_applied_replacements(&self) -> bool {
+        !self.applied_replacements.is_empty()
     }
 
     pub(crate) fn build_session(

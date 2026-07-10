@@ -31,7 +31,12 @@ pub(super) fn detect_internal(
         };
     }
 
-    let result = crate::detect::detect_with_policy(text, &redactor.policy, &ranges);
+    let result = crate::detect::detect_with_policy(
+        text,
+        &redactor.compiled_policy.policy,
+        &redactor.compiled_policy.custom_strings,
+        &ranges,
+    );
     let mut findings = result.findings;
     let mut stats = DetectionStats {
         dropped_findings: result.dropped_findings,
@@ -39,7 +44,7 @@ pub(super) fn detect_internal(
     };
 
     if let Some(config) = &redactor.llm {
-        match crate::llm::discover_candidates(config, text, redactor.policy.rules) {
+        match crate::llm::discover_candidates(config, text, redactor.compiled_policy.policy.rules) {
             Ok(mut llm_findings) => {
                 stats.llm_candidates_total += llm_findings.len();
                 findings.append(&mut llm_findings);

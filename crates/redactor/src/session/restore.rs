@@ -1,22 +1,51 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, anyhow};
 
 use crate::replace::{is_v2_token_like, parse_token, token_like_ranges};
 use crate::types::{RedactionSession, RestoreResult};
 
-pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> RestoreResult {
-    let known_tokens = session
-        .entries
-        .iter()
-        .map(|entry| entry.token.clone())
-        .collect::<BTreeSet<_>>();
-    let token_map = session
-        .entries
-        .iter()
-        .map(|entry| (entry.token.as_str(), entry.original.as_str()))
-        .collect::<HashMap<_, _>>();
+#[derive(Debug)]
+pub struct RestoreContext<'a> {
+    session: &'a RedactionSession,
+    known_tokens: HashSet<&'a str>,
+    token_map: HashMap<&'a str, &'a str>,
+}
 
+impl<'a> RestoreContext<'a> {
+    pub fn new(session: &'a RedactionSession) -> Self {
+        let known_tokens = session
+            .entries
+            .iter()
+            .map(|entry| entry.token.as_str())
+            .collect();
+        let token_map = session
+            .entries
+            .iter()
+            .map(|entry| (entry.token.as_str(), entry.original.as_str()))
+            .collect();
+        Self {
+            session,
+            known_tokens,
+            token_map,
+        }
+    }
+
+    pub fn restore_text(&self, input: &str) -> RestoreResult {
+        restore_text(input, self.session, &self.known_tokens, &self.token_map)
+    }
+}
+
+pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> RestoreResult {
+    RestoreContext::new(session).restore_text(input)
+}
+
+fn restore_text(
+    input: &str,
+    session: &RedactionSession,
+    known_tokens: &HashSet<&str>,
+    token_map: &HashMap<&str, &str>,
+) -> RestoreResult {
     let mut restored_text = String::with_capacity(input.len());
     let mut restored_count = 0;
     let mut validation_errors = Vec::new();
@@ -61,9 +90,11 @@ pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> Res
         .collect::<Vec<_>>();
 
     if !unresolved_tokens.is_empty() {
-        validation_errors.extend(unresolved_tokens.iter().map(|candidate| {
-            format!("unresolved token remained after restore: `{candidate}`")
-        }));
+        validation_errors.extend(
+            unresolved_tokens
+                .iter()
+                .map(|candidate| format!("unresolved token remained after restore: `{candidate}`")),
+        );
     }
 
     RestoreResult {
@@ -98,7 +129,7 @@ pub fn ensure_restore_valid(result: &RestoreResult) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::restore_text_with_session;
+    use super::{RestoreContext, restore_text_with_session};
     use crate::{FindingKind, RedactionPolicy, Redactor, RedactorBuilder};
 
     fn domain_redactor() -> Redactor {
@@ -126,6 +157,21 @@ mod tests {
     }
 
     #[test]
+    fn restore_context_reuses_session_index_across_fragments() {
+        let redactor = domain_redactor();
+        let session = redactor
+            .redact_with_session("first.example.com second.example.com")
+            .expect("session");
+        let context = RestoreContext::new(&session);
+
+        for entry in &session.entries {
+            let restored = context.restore_text(&entry.token);
+            assert!(restored.is_valid());
+            assert_eq!(restored.restored_text, entry.original);
+        }
+    }
+
+    #[test]
     fn restore_preserves_unknown_token_validation() {
         let redactor = domain_redactor();
         let session = redactor
@@ -137,12 +183,9 @@ mod tests {
             &session,
         );
 
-        assert!(
-            restored
-                .validation_errors
-                .iter()
-                .any(|message| message.contains("unknown token") || message.contains("unresolved token"))
-        );
+        assert!(restored.validation_errors.iter().any(
+            |message| message.contains("unknown token") || message.contains("unresolved token")
+        ));
         assert_eq!(restored.unresolved_tokens, vec![unknown]);
     }
 

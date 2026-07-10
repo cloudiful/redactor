@@ -29,3 +29,23 @@ fn main() -> anyhow::Result<()> {
 
 The crate keeps session-based restoration APIs available for reversible masking flows, including git diff handling through `InputKind::GitDiff`.
 Domain and person detection are disabled by default; configure `RedactionRules` when callers need those finding kinds.
+
+For structured payloads with multiple text fields, reuse one `SessionRedactor` and finish the
+session after all fields are processed. Reuse one `RestoreContext` when restoring those fields;
+this avoids rebuilding session state and token indexes for every field.
+
+```rust
+use cloudiful_redactor::{
+    RedactionPolicy, RedactorBuilder, RestoreContext, SessionRedactor,
+};
+
+let policy = RedactionPolicy::default();
+let redactor = RedactorBuilder::new()
+    .with_redaction_policy(policy.clone())
+    .build();
+let mut processor = SessionRedactor::new();
+let redacted = processor.redact_fragment(&redactor, "alice@example.com")?;
+let session = processor.finish_session("alice@example.com", &redacted, &policy);
+let restored = RestoreContext::new(&session).restore_text(&redacted);
+# Ok::<(), cloudiful_redactor::RedactorError>(())
+```

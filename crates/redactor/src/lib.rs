@@ -20,9 +20,9 @@ pub use service::{
     restore_text_from_store,
 };
 pub use session::{
-    decrypt_session_from_str, encrypt_session_to_string, ensure_restore_valid,
-    inspect_encrypted_session, require_external_id, restore_patch_with_session,
-    restore_text_with_session, SessionStore, StoredSession,
+    RestoreContext, SessionStore, StoredSession, decrypt_session_from_str,
+    encrypt_session_to_string, ensure_restore_valid, inspect_encrypted_session,
+    require_external_id, restore_patch_with_session, restore_text_with_session,
 };
 use thiserror::Error;
 pub use types::{

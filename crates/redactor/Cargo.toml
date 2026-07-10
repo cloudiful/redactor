@@ -34,3 +34,7 @@ optional = true
 [features]
 default = []
 ollama = ["dep:reqwest"]
+
+[[bench]]
+name = "redaction_pipeline"
+harness = false

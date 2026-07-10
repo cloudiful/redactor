@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     Finding, InputKind, LlmConfig, RedactionArtifact, RedactionPolicy, RedactionResult,
     RedactionRules, RedactionSession, RedactorError, RestoreResult, restore_patch_with_session,
@@ -44,9 +46,13 @@ impl RedactorBuilder {
     }
 
     pub fn build(self) -> Redactor {
+        let custom_strings = crate::detect::CompiledCustomStrings::new(&self.policy.custom_strings);
         Redactor {
             llm: self.llm,
-            policy: self.policy,
+            compiled_policy: Arc::new(CompiledPolicy {
+                policy: self.policy,
+                custom_strings,
+            }),
         }
     }
 }
@@ -54,7 +60,13 @@ impl RedactorBuilder {
 #[derive(Debug, Clone)]
 pub struct Redactor {
     pub(super) llm: Option<LlmConfig>,
-    pub(super) policy: RedactionPolicy,
+    compiled_policy: Arc<CompiledPolicy>,
+}
+
+#[derive(Debug)]
+struct CompiledPolicy {
+    policy: RedactionPolicy,
+    custom_strings: crate::detect::CompiledCustomStrings,
 }
 
 #[derive(Debug, Default)]
@@ -63,6 +75,10 @@ pub struct SessionRedactor {
 }
 
 impl Redactor {
+    pub fn policy(&self) -> &RedactionPolicy {
+        &self.compiled_policy.policy
+    }
+
     pub fn redact(&self, text: &str) -> Result<RedactionResult, RedactorError> {
         self.redact_with_input_kind(text, InputKind::Text)
     }
@@ -129,7 +145,7 @@ impl Redactor {
         let mut processor =
             crate::replace::ReplacementProcessor::with_prior_session(prior_session, external_id)?;
         let redacted_text = processor.redact_fragment(text, &findings);
-        let session = processor.build_session(text, &redacted_text, &self.policy);
+        let session = processor.build_session(text, &redacted_text, self.policy());
         let applied_replacements = processor.into_applied_replacements();
         let stats = stats_for(self.llm.is_some(), &findings, outcome.stats);
 
@@ -226,6 +242,28 @@ impl SessionRedactor {
         text: &str,
     ) -> Result<String, RedactorError> {
         self.redact_text_fragment(redactor, text)
+    }
+
+    pub fn redact_fragment_with_input_kind(
+        &mut self,
+        redactor: &Redactor,
+        text: &str,
+        input_kind: InputKind,
+    ) -> Result<String, RedactorError> {
+        self.redact_text_fragment_with_input_kind(redactor, text, input_kind)
+    }
+
+    pub fn finish_session(
+        &self,
+        original_text: &str,
+        redacted_text: &str,
+        policy: &RedactionPolicy,
+    ) -> RedactionSession {
+        self.build_redaction_session(original_text, redacted_text, policy)
+    }
+
+    pub fn has_applied_replacements(&self) -> bool {
+        self.processor.has_applied_replacements()
     }
 
     pub fn build_session(&self, original_text: &str, redacted_text: &str) -> RedactionSession {

@@ -181,7 +181,62 @@ fn stateful_sessions_reuse_tokens_for_same_external_id() {
 
     assert_eq!(first.session.external_id.as_deref(), Some("conv-1"));
     assert_eq!(first.session.scope_id, second.session.scope_id);
-    assert_eq!(first.session.entries[0].token, second.session.entries[0].token);
+    assert_eq!(
+        first.session.entries[0].token,
+        second.session.entries[0].token
+    );
+}
+
+#[test]
+fn session_redactor_accumulates_fragments_and_finishes_once() {
+    let policy = RedactionPolicy::default().with_kind(FindingKind::Domain, true);
+    let redactor = RedactorBuilder::new()
+        .with_redaction_policy(policy.clone())
+        .build();
+    let mut processor = crate::SessionRedactor::new();
+
+    let first = processor
+        .redact_fragment(&redactor, "first.example.com")
+        .expect("first");
+    let repeated = processor
+        .redact_fragment_with_input_kind(
+            &redactor,
+            "first.example.com second.example.com",
+            InputKind::Text,
+        )
+        .expect("second");
+    let session = processor.finish_session(
+        "first.example.com\nfirst.example.com second.example.com",
+        &format!("{first}\n{repeated}"),
+        &policy,
+    );
+
+    assert!(processor.has_applied_replacements());
+    assert_eq!(session.entries.len(), 2);
+    assert!(repeated.contains(&session.entries[0].token));
+}
+
+#[test]
+fn session_redactor_imports_prior_session_once() {
+    let policy = RedactionPolicy::default().with_kind(FindingKind::Domain, true);
+    let redactor = RedactorBuilder::new()
+        .with_redaction_policy(policy.clone())
+        .build();
+    let prior = redactor
+        .redact_with_session("first.example.com")
+        .expect("prior");
+    let mut processor =
+        crate::SessionRedactor::with_prior_session(Some(&prior), None).expect("session processor");
+
+    let redacted = processor
+        .redact_fragment(&redactor, "first.example.com second.example.com")
+        .expect("redact");
+    let session =
+        processor.finish_session("first.example.com second.example.com", &redacted, &policy);
+
+    assert_eq!(session.scope_id, prior.scope_id);
+    assert_eq!(session.entries.len(), 2);
+    assert!(redacted.contains(&prior.entries[0].token));
 }
 
 #[test]

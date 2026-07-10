@@ -2,7 +2,7 @@ use crate::input::RedactableRange;
 use crate::types::{Finding, RedactionPolicy, RedactionRules};
 
 use super::contextual::{detect_contextual_assignments, propagate_repeated_secrets};
-use super::custom::{detect_custom_files, detect_custom_strings};
+use super::custom::{CompiledCustomStrings, detect_custom_files, detect_custom_strings};
 use super::regexes::{cidr_regex, ip_regex, secret_regex, url_regex};
 use super::scanners::{detect_domains, detect_emails, detect_pattern, detect_phones};
 use super::select_non_overlapping;
@@ -16,6 +16,7 @@ pub(crate) struct PolicyDetectionResult {
 pub(crate) fn detect_with_policy(
     text: &str,
     policy: &RedactionPolicy,
+    custom_strings: &CompiledCustomStrings,
     ranges: &[RedactableRange],
 ) -> PolicyDetectionResult {
     let mut findings = Vec::new();
@@ -38,7 +39,7 @@ pub(crate) fn detect_with_policy(
         let fragment = &text[range_info.range.clone()];
         let offset = range_info.range.start;
         let mut fragment_findings = detect_builtins(fragment, &policy.rules);
-        fragment_findings.extend(detect_custom_strings(fragment, &policy.custom_strings));
+        fragment_findings.extend(detect_custom_strings(fragment, custom_strings));
 
         for finding in &mut fragment_findings {
             finding.start += offset;
