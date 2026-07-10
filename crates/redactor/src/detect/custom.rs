@@ -99,7 +99,7 @@ pub(crate) fn detect_custom_strings(text: &str, compiled: &CompiledCustomStrings
 
 fn matched_rules<'a>(text: &str, compiled: &'a CompiledRuleSet) -> Vec<&'a CompiledRule> {
     let Some(set) = &compiled.set else {
-        return Vec::new();
+        return compiled.rules.iter().collect();
     };
     set.matches(text)
         .iter()
