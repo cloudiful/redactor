@@ -10,6 +10,7 @@ use super::validators::normalize;
 
 #[derive(Debug)]
 struct CompiledRule {
+    index: usize,
     rule: CustomStringRule,
     regex: Regex,
 }
@@ -37,9 +38,11 @@ impl CompiledCustomStrings {
         });
         let regex = rules
             .iter()
-            .filter(|rule| rule.match_type == CustomStringMatch::Regex)
-            .filter_map(|rule| {
+            .enumerate()
+            .filter(|(_, rule)| rule.match_type == CustomStringMatch::Regex)
+            .filter_map(|(index, rule)| {
                 Regex::new(&rule.pattern).ok().map(|regex| CompiledRule {
+                    index,
                     rule: rule.clone(),
                     regex,
                 })
@@ -60,10 +63,12 @@ fn compile_rule_set(
 ) -> CompiledRuleSet {
     let compiled = rules
         .iter()
-        .filter(|rule| rule.match_type == match_type)
-        .filter_map(|rule| {
+        .enumerate()
+        .filter(|(_, rule)| rule.match_type == match_type)
+        .filter_map(|(index, rule)| {
             let pattern = pattern_for(&rule.pattern);
             Regex::new(&pattern).ok().map(|regex| CompiledRule {
+                index,
                 rule: rule.clone(),
                 regex,
             })
@@ -81,29 +86,25 @@ fn compile_rule_set(
 pub(crate) fn detect_custom_strings(text: &str, compiled: &CompiledCustomStrings) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut line_matches = BTreeMap::<(usize, usize), Finding>::new();
-    detect_rule_set(text, &compiled.exact, &mut findings, &mut line_matches);
-    detect_rule_set(text, &compiled.contains, &mut findings, &mut line_matches);
-    for compiled_rule in &compiled.regex {
+    let mut candidates = matched_rules(text, &compiled.exact);
+    candidates.extend(matched_rules(text, &compiled.contains));
+    candidates.extend(&compiled.regex);
+    candidates.sort_unstable_by_key(|rule| rule.index);
+    for compiled_rule in candidates {
         push_rule_matches(text, compiled_rule, &mut findings, &mut line_matches);
     }
     findings.extend(line_matches.into_values());
     findings
 }
 
-fn detect_rule_set(
-    text: &str,
-    compiled: &CompiledRuleSet,
-    findings: &mut Vec<Finding>,
-    line_matches: &mut BTreeMap<(usize, usize), Finding>,
-) {
+fn matched_rules<'a>(text: &str, compiled: &'a CompiledRuleSet) -> Vec<&'a CompiledRule> {
     let Some(set) = &compiled.set else {
-        return;
+        return Vec::new();
     };
-    for index in set.matches(text).iter() {
-        if let Some(rule) = compiled.rules.get(index) {
-            push_rule_matches(text, rule, findings, line_matches);
-        }
-    }
+    set.matches(text)
+        .iter()
+        .filter_map(|index| compiled.rules.get(index))
+        .collect()
 }
 
 fn push_rule_matches(
