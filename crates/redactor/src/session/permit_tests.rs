@@ -84,3 +84,11 @@ fn permit_from_other_external_id_is_rejected() {
     let permit = create_restore_permit(&artifact(Some("thread-b")).session);
     assert!(RestoreContext::with_permits(&session.session, &[permit]).is_err());
 }
+
+#[test]
+fn unknown_permit_version_is_rejected_by_restore_context() {
+    let session = artifact(Some("thread-a"));
+    let mut permit = create_restore_permit(&session.session);
+    permit.version += 1;
+    assert!(RestoreContext::with_permits(&session.session, &[permit]).is_err());
+}

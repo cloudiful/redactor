@@ -38,8 +38,39 @@ Domain and person detection are disabled by default. Use `RedactionRules` or con
 For reversible redaction, use the session-based APIs:
 
 - `Redactor::redact_with_session`
+- `RestoreState::new` and `RestoreState::advance`
+- `RestoreState::restore_text`
+- `RestoreState::streaming_restore_context`
 - `restore_text_with_session`
 - `restore_patch_with_session`
+
+`RestoreState` accumulates token authorization across rounds while retaining one permit token
+reference per uniquely authorized token. `StreamingRestoreContext` restores a decoded logical text
+stream incrementally and buffers only an unfinished token candidate:
+
+```rust
+use cloudiful_redactor::{RedactorBuilder, RestoreState};
+
+let redactor = RedactorBuilder::new().build();
+let session = redactor.redact_with_session("mail=alice@example.com")?;
+let state = RestoreState::new(session)?;
+let token = state.session().redacted_text.clone();
+let mut stream = state.streaming_restore_context()?;
+let first = stream.push_str(&token[..8]);
+let second = stream.push_str(&token[8..]);
+let end = stream.finish();
+let restored = first.restored_text + &second.restored_text + &end.restored_text;
+assert_eq!(restored, "mail=alice@example.com");
+# Ok::<(), anyhow::Error>(())
+```
+
+Create a separate streaming context per logical text stream. JSON escapes must be decoded before
+restoration and re-serialized afterward; the library does not handle transport framing.
+
+State contains the plaintext session and therefore original sensitive values. Never include it in a
+model prompt. Persist it only with encryption and access controls. Version 0.5 does not automatically
+convert or migrate legacy `RedactionSession` values. Callers must not seed state from old envelopes;
+prompt-ferry upgrades must discard them and establish new state from new redaction rounds.
 
 ## HTTP service
 

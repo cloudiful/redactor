@@ -21,11 +21,12 @@ pub use service::{
     restore_text_from_store,
 };
 pub use session::{
-    RestoreContext, SessionStore, SessionStoreError, StoredSession, authorized_tokens,
-    create_restore_permit, decrypt_restore_permit, decrypt_session_from_storage,
-    decrypt_session_from_str, encrypt_restore_permit, encrypt_session_for_storage,
-    encrypt_session_to_string, ensure_restore_valid, inspect_encrypted_session,
-    require_external_id, restore_patch_with_session, restore_text_with_session,
+    RestoreContext, RestoreState, SessionStore, SessionStoreError, StoredSession,
+    StreamingRestoreContext, authorized_tokens, create_restore_permit, decrypt_restore_permit,
+    decrypt_session_from_storage, decrypt_session_from_str, encrypt_restore_permit,
+    encrypt_session_for_storage, encrypt_session_to_string, ensure_restore_valid,
+    inspect_encrypted_session, require_external_id, restore_patch_with_session,
+    restore_text_with_session,
 };
 use thiserror::Error;
 pub use types::{

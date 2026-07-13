@@ -32,6 +32,48 @@ Each new session records only the tokens issued by that redaction operation. Res
 tokens that are not authorized by that operation and reports them through `RestoreResult::skipped_tokens`.
 Domain and person detection are disabled by default; configure `RedactionRules` when callers need those finding kinds.
 
+Use `RestoreState` to retain authorization across redaction rounds without retaining duplicate token
+references:
+
+```rust
+use cloudiful_redactor::{RedactorBuilder, RestoreState};
+
+let redactor = RedactorBuilder::new().build();
+let session = redactor.redact_with_session("mail=alice@example.com")?;
+let state = RestoreState::new(session)?;
+let restored = state.restore_text(&state.session().redacted_text)?;
+assert_eq!(restored.restored_text, "mail=alice@example.com");
+# Ok::<(), anyhow::Error>(())
+```
+
+For decoded response fragments, create one `StreamingRestoreContext` per logical text stream. It
+buffers only an incomplete marker or token, up to 4096 bytes:
+
+```rust
+# use cloudiful_redactor::{RedactorBuilder, RestoreState};
+# let session = RedactorBuilder::new().build()
+#     .redact_with_session("mail=alice@example.com")?;
+let state = RestoreState::new(session)?;
+let token = state.session().redacted_text.clone();
+let split = token.len() / 2;
+let mut stream = state.streaming_restore_context()?;
+let first = stream.push_str(&token[..split]);
+let second = stream.push_str(&token[split..]);
+let end = stream.finish();
+let restored = first.restored_text + &second.restored_text + &end.restored_text;
+assert_eq!(restored, "mail=alice@example.com");
+# Ok::<(), anyhow::Error>(())
+```
+
+Fragments must already be UTF-8 decoded. Decode JSON escapes before restoration, then serialize the
+restored value again. The streaming API does not parse bytes, JSON, SSE, HTTP, or other framing.
+
+`RestoreState` contains a full plaintext `RedactionSession`, including original sensitive values.
+Never place it in a model prompt. Encrypt it at rest and restrict access to the restoring caller.
+Legacy `RedactionSession` values are not automatically converted or migrated into state. Callers
+must not seed state from an old envelope. When upgrading prompt-ferry, discard old envelopes and
+establish new `RestoreState` values from new redaction rounds.
+
 For structured payloads with multiple text fields, reuse one `SessionRedactor` and finish the
 session after all fields are processed. Reuse one `RestoreContext` when restoring those fields;
 this avoids rebuilding session state and token indexes for every field.

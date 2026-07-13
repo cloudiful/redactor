@@ -2,8 +2,8 @@ use crate::types::FindingKind;
 use sha2::{Digest, Sha256};
 use std::ops::Range;
 
-const TOKEN_PREFIX: &str = "[[RDX:v2:";
-const TOKEN_SUFFIX: &str = "]]";
+pub(crate) const TOKEN_PREFIX: &str = "[[RDX:v2:";
+pub(crate) const TOKEN_SUFFIX: &str = "]]";
 const CHECK_LEN: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

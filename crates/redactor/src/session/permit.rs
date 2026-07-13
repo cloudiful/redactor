@@ -6,7 +6,7 @@ use crate::{RedactionSession, RestorePermit};
 
 use super::crypto::{open_json, seal_json};
 
-const PERMIT_VERSION: u32 = 1;
+pub(super) const PERMIT_VERSION: u32 = 1;
 const PERMIT_AAD: &[u8] = b"redactor:restore-permit:v1";
 
 pub fn create_restore_permit(session: &RedactionSession) -> RestorePermit {
@@ -46,6 +46,12 @@ pub fn authorized_tokens<'a>(
         .collect::<HashSet<_>>();
     let mut authorized = HashSet::new();
     for permit in permits {
+        if permit.version != PERMIT_VERSION {
+            return Err(anyhow!(
+                "unsupported restore permit version {}",
+                permit.version
+            ));
+        }
         if permit.scope_id != session.scope_id || permit.external_id != session.external_id {
             return Err(anyhow!("restore permit does not match session context"));
         }

@@ -24,7 +24,7 @@ impl<'a> RestoreContext<'a> {
         Ok(Self::from_authorized_tokens(session, authorized))
     }
 
-    fn from_authorized_tokens(
+    pub(super) fn from_authorized_tokens(
         session: &'a RedactionSession,
         authorized_tokens: HashSet<&'a str>,
     ) -> Self {
