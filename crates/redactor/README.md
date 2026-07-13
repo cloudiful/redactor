@@ -28,6 +28,8 @@ fn main() -> anyhow::Result<()> {
 ```
 
 The crate keeps session-based restoration APIs available for reversible masking flows, including git diff handling through `InputKind::GitDiff`.
+Each new session records only the tokens issued by that redaction operation. Restore skips valid RDX
+tokens that are not authorized by that operation and reports them through `RestoreResult::skipped_tokens`.
 Domain and person detection are disabled by default; configure `RedactionRules` when callers need those finding kinds.
 
 For structured payloads with multiple text fields, reuse one `SessionRedactor` and finish the

@@ -7,23 +7,23 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::settings::{
-    DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, DEFAULT_PROXY_LISTEN,
-    DEFAULT_SESSION_PASSPHRASE_ENV, LlmMode,
+    DEFAULT_HTTP_LISTEN, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, DEFAULT_SESSION_PASSPHRASE_ENV,
+    LlmMode,
 };
 
 pub(crate) const CONFIG_ENV_PREFIX: &str = "REDACTOR_";
 pub(crate) const DEFAULT_CONFIG_PATH: &str = "redactor.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct AppConfig {
     pub(crate) llm: LlmSettings,
     pub(crate) redaction: RedactionPolicy,
-    pub(crate) proxy: ProxySettings,
+    pub(crate) http: HttpSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct LlmSettings {
     pub(crate) mode: LlmMode,
     pub(crate) ollama_url: String,
@@ -41,28 +41,28 @@ impl Default for LlmSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub(crate) struct ProxySettings {
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct HttpSettings {
     pub(crate) listen: String,
     pub(crate) audit_dir: Option<PathBuf>,
     pub(crate) session_passphrase_env: String,
     pub(crate) valkey_url: Option<String>,
     pub(crate) session_ttl_seconds: Option<u64>,
-    pub(crate) session_key_prefix: Option<String>,
+    pub(crate) session_key_namespace: Option<String>,
     pub(crate) cors_allowed_origins: Vec<String>,
     pub(crate) tls_cert_path: Option<PathBuf>,
     pub(crate) tls_key_path: Option<PathBuf>,
 }
 
-impl Default for ProxySettings {
+impl Default for HttpSettings {
     fn default() -> Self {
         Self {
-            listen: DEFAULT_PROXY_LISTEN.to_string(),
+            listen: DEFAULT_HTTP_LISTEN.to_string(),
             audit_dir: None,
             session_passphrase_env: DEFAULT_SESSION_PASSPHRASE_ENV.to_string(),
             valkey_url: None,
             session_ttl_seconds: None,
-            session_key_prefix: None,
+            session_key_namespace: None,
             cors_allowed_origins: Vec::new(),
             tls_cert_path: None,
             tls_key_path: None,
@@ -215,7 +215,7 @@ mod tests {
         let keys = vec![
             format!("{CONFIG_ENV_PREFIX}LLM__MODE"),
             format!("{CONFIG_ENV_PREFIX}LLM__MODEL"),
-            format!("{CONFIG_ENV_PREFIX}PROXY__LISTEN"),
+            format!("{CONFIG_ENV_PREFIX}HTTP__LISTEN"),
         ];
 
         let config = {
@@ -231,7 +231,7 @@ mod tests {
 
         let written = fs::read_to_string(&path).expect("read config");
         assert!(written.contains("[llm]"));
-        assert!(written.contains("[proxy]"));
+        assert!(written.contains("[http]"));
     }
 
     #[test]
@@ -247,11 +247,11 @@ mod tests {
                 "\"qwen3:14b\"".to_string(),
             ),
             (
-                format!("{CONFIG_ENV_PREFIX}PROXY__LISTEN"),
+                format!("{CONFIG_ENV_PREFIX}HTTP__LISTEN"),
                 "\"0.0.0.0:9900\"".to_string(),
             ),
             (
-                format!("{CONFIG_ENV_PREFIX}PROXY__VALKEY_URL"),
+                format!("{CONFIG_ENV_PREFIX}HTTP__VALKEY_URL"),
                 "\"redis://127.0.0.1:6379/0\"".to_string(),
             ),
         ];
@@ -260,11 +260,27 @@ mod tests {
             let config = load(&path).expect("load config");
             assert_eq!(config.llm.mode, super::LlmMode::Ollama);
             assert_eq!(config.llm.model, "qwen3:14b");
-            assert_eq!(config.proxy.listen, "0.0.0.0:9900");
+            assert_eq!(config.http.listen, "0.0.0.0:9900");
             assert_eq!(
-                config.proxy.valkey_url.as_deref(),
+                config.http.valkey_url.as_deref(),
                 Some("redis://127.0.0.1:6379/0")
             );
         });
+    }
+
+    #[test]
+    fn load_rejects_removed_proxy_configuration() {
+        let path = temp_path();
+        fs::write(
+            &path,
+            "[proxy]\nlisten = \"127.0.0.1:8787\"\nupstream = \"https://example.invalid\"\n",
+        )
+        .expect("write legacy config");
+        let error = load(&path).expect_err("legacy config must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("failed to load application config")
+        );
     }
 }

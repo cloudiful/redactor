@@ -18,8 +18,8 @@ pub(crate) struct RedactCommand {
     pub(crate) llm: ResolvedLlmArgs,
     pub(crate) policy: RedactionPolicy,
     pub(crate) source_path: Option<String>,
-    pub(crate) external_id: Option<String>,
     pub(crate) session_out: Option<PathBuf>,
+    pub(crate) permit_out: Option<PathBuf>,
     pub(crate) session_passphrase: SessionPassphraseArgs,
 }
 
@@ -28,13 +28,10 @@ pub(crate) fn run(command: RedactCommand) -> Result<()> {
     let redactor = build_redactor(command.llm, command.policy);
     let input_kind = InputKind::from(command.input_kind.input_kind);
 
-    if command.external_id.is_some() {
-        return Err(anyhow::anyhow!(
-            "external_id stateful redaction requires an injected session store provider; the CLI does not ship a built-in provider"
-        ));
-    }
-
     if let Some(path) = command.session_out {
+        let permit_path = command
+            .permit_out
+            .context("--permit-out is required when --session-out is used")?;
         let passphrase = resolve_session_passphrase(command.session_passphrase)?;
         let secured = if let Some(ref source) = command.source_path {
             redactor::redact_text_with_encrypted_session_and_source(
@@ -51,11 +48,14 @@ pub(crate) fn run(command: RedactCommand) -> Result<()> {
         };
         fs::write(&path, &secured.encrypted_session)
             .with_context(|| format!("failed to write session file {}", path.display()))?;
+        fs::write(&permit_path, &secured.restore_permit)
+            .with_context(|| format!("failed to write restore permit {}", permit_path.display()))?;
         print_report(
             command.report.report,
             &SanitizedRedactionOutput {
                 redacted_text: secured.artifact.session.redacted_text.clone(),
                 session_file: Some(path.display().to_string()),
+                restore_permit_file: Some(permit_path.display().to_string()),
                 stats: secured.artifact.result.stats.clone(),
             },
             &secured.artifact.session.redacted_text,
@@ -72,6 +72,7 @@ pub(crate) fn run(command: RedactCommand) -> Result<()> {
             &SanitizedRedactionOutput {
                 redacted_text: artifact.result.redacted_text.clone(),
                 session_file: None,
+                restore_permit_file: None,
                 stats: artifact.result.stats.clone(),
             },
             &artifact.result.redacted_text,

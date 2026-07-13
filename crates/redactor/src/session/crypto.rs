@@ -1,4 +1,4 @@
-use aes_gcm_siv::aead::{Aead, KeyInit};
+use aes_gcm_siv::aead::{Aead, KeyInit, Payload};
 use aes_gcm_siv::{Aes256GcmSiv, Nonce};
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -10,6 +10,15 @@ use crate::types::{RedactionSession, SessionEntrySummary};
 
 const KDF_ROUNDS: u32 = 600_000;
 const SESSION_VERSION: u32 = 2;
+const OPAQUE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct OpaqueEncryptedPayload {
+    version: u32,
+    salt_b64: String,
+    nonce_b64: String,
+    ciphertext_b64: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct EncryptedSessionFile {
@@ -69,6 +78,23 @@ pub fn encrypt_session_to_string(session: &RedactionSession, passphrase: &str) -
         .context("failed to serialize encrypted session envelope")
 }
 
+pub fn encrypt_session_for_storage(
+    session: &RedactionSession,
+    passphrase: &str,
+    external_id: &str,
+) -> Result<String> {
+    seal_json(session, passphrase, storage_aad(external_id).as_bytes())
+}
+
+pub fn decrypt_session_from_storage(
+    data: &str,
+    passphrase: &str,
+    external_id: &str,
+) -> Result<RedactionSession> {
+    open_json(data, passphrase, storage_aad(external_id).as_bytes())
+        .context("failed to decrypt stored session")
+}
+
 pub fn decrypt_session_from_str(data: &str, passphrase: &str) -> Result<RedactionSession> {
     let envelope = parse_envelope(data)?;
     if envelope.version != SESSION_VERSION {
@@ -97,6 +123,71 @@ pub fn decrypt_session_from_str(data: &str, passphrase: &str) -> Result<Redactio
 
 pub(crate) fn parse_envelope(data: &str) -> Result<EncryptedSessionFile> {
     serde_json::from_str(data).context("failed to parse encrypted session file")
+}
+
+pub(crate) fn seal_json<T: Serialize>(value: &T, passphrase: &str, aad: &[u8]) -> Result<String> {
+    let mut salt = [0u8; 16];
+    let mut nonce = [0u8; 12];
+    getrandom::fill(&mut salt).map_err(|error| anyhow!("failed to generate salt: {error}"))?;
+    getrandom::fill(&mut nonce).map_err(|error| anyhow!("failed to generate nonce: {error}"))?;
+    let key = derive_key(passphrase, &salt);
+    let cipher = Aes256GcmSiv::new_from_slice(&key)
+        .map_err(|error| anyhow!("failed to initialize cipher: {error}"))?;
+    let plaintext = serde_json::to_vec(value).context("failed to serialize encrypted payload")?;
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &plaintext,
+                aad,
+            },
+        )
+        .map_err(|_| anyhow!("failed to encrypt payload"))?;
+    serde_json::to_string(&OpaqueEncryptedPayload {
+        version: OPAQUE_VERSION,
+        salt_b64: STANDARD.encode(salt),
+        nonce_b64: STANDARD.encode(nonce),
+        ciphertext_b64: STANDARD.encode(ciphertext),
+    })
+    .context("failed to serialize encrypted payload")
+}
+
+pub(crate) fn open_json<T: for<'de> Deserialize<'de>>(
+    data: &str,
+    passphrase: &str,
+    aad: &[u8],
+) -> Result<T> {
+    let payload: OpaqueEncryptedPayload =
+        serde_json::from_str(data).context("failed to parse encrypted payload")?;
+    if payload.version != OPAQUE_VERSION {
+        return Err(anyhow!(
+            "unsupported encrypted payload version {}",
+            payload.version
+        ));
+    }
+    let salt = decode_exact::<16>(&payload.salt_b64).context("invalid encrypted payload salt")?;
+    let nonce =
+        decode_exact::<12>(&payload.nonce_b64).context("invalid encrypted payload nonce")?;
+    let ciphertext = STANDARD
+        .decode(payload.ciphertext_b64.as_bytes())
+        .context("invalid encrypted payload ciphertext")?;
+    let key = derive_key(passphrase, &salt);
+    let cipher = Aes256GcmSiv::new_from_slice(&key)
+        .map_err(|error| anyhow!("failed to initialize cipher: {error}"))?;
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &ciphertext,
+                aad,
+            },
+        )
+        .map_err(|_| anyhow!("failed to decrypt payload"))?;
+    serde_json::from_slice(&plaintext).context("failed to deserialize encrypted payload")
+}
+
+fn storage_aad(external_id: &str) -> String {
+    format!("redactor:session-store:v1:{external_id}")
 }
 
 fn derive_key(passphrase: &str, salt: &[u8; 16]) -> [u8; 32] {

@@ -2,37 +2,45 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, anyhow};
 
-use crate::replace::{is_v2_token_like, parse_token, token_like_ranges};
-use crate::types::{RedactionSession, RestoreResult};
+use crate::replace::{parse_token, token_like_ranges};
+use crate::types::{RedactionSession, RestorePermit, RestoreResult};
+
+use super::permit::authorized_tokens;
 
 #[derive(Debug)]
 pub struct RestoreContext<'a> {
-    session: &'a RedactionSession,
-    known_tokens: HashSet<&'a str>,
+    authorized_tokens: HashSet<&'a str>,
     token_map: HashMap<&'a str, &'a str>,
 }
 
 impl<'a> RestoreContext<'a> {
     pub fn new(session: &'a RedactionSession) -> Self {
-        let known_tokens = session
-            .entries
-            .iter()
-            .map(|entry| entry.token.as_str())
-            .collect();
+        let issued = session.issued_tokens.iter().map(String::as_str).collect();
+        Self::from_authorized_tokens(session, issued)
+    }
+
+    pub fn with_permits(session: &'a RedactionSession, permits: &[RestorePermit]) -> Result<Self> {
+        let authorized = authorized_tokens(session, permits)?;
+        Ok(Self::from_authorized_tokens(session, authorized))
+    }
+
+    fn from_authorized_tokens(
+        session: &'a RedactionSession,
+        authorized_tokens: HashSet<&'a str>,
+    ) -> Self {
         let token_map = session
             .entries
             .iter()
             .map(|entry| (entry.token.as_str(), entry.original.as_str()))
             .collect();
         Self {
-            session,
-            known_tokens,
+            authorized_tokens,
             token_map,
         }
     }
 
     pub fn restore_text(&self, input: &str) -> RestoreResult {
-        restore_text(input, self.session, &self.known_tokens, &self.token_map)
+        restore_text(input, &self.authorized_tokens, &self.token_map)
     }
 }
 
@@ -42,12 +50,13 @@ pub fn restore_text_with_session(input: &str, session: &RedactionSession) -> Res
 
 fn restore_text(
     input: &str,
-    session: &RedactionSession,
-    known_tokens: &HashSet<&str>,
+    authorized_tokens: &HashSet<&str>,
     token_map: &HashMap<&str, &str>,
 ) -> RestoreResult {
     let mut restored_text = String::with_capacity(input.len());
     let mut restored_count = 0;
+    let mut skipped_tokens = Vec::new();
+    let mut unresolved_tokens = Vec::new();
     let mut validation_errors = Vec::new();
     let mut cursor = 0;
 
@@ -55,15 +64,8 @@ fn restore_text(
         restored_text.push_str(&input[cursor..token_range.start]);
         let candidate = &input[token_range.clone()];
         match parse_token(candidate) {
-            Ok(parsed) if parsed.scope_id != session.scope_id => {
-                validation_errors.push(format!(
-                    "token `{candidate}` does not belong to session scope `{}`",
-                    session.scope_id
-                ));
-                restored_text.push_str(candidate);
-            }
-            Ok(_) if !known_tokens.contains(candidate) => {
-                validation_errors.push(format!("unknown token `{candidate}`"));
+            Ok(_) if !authorized_tokens.contains(candidate) => {
+                skipped_tokens.push(candidate.to_string());
                 restored_text.push_str(candidate);
             }
             Ok(_) => {
@@ -71,10 +73,15 @@ fn restore_text(
                     restored_text.push_str(original);
                     restored_count += 1;
                 } else {
+                    unresolved_tokens.push(candidate.to_string());
+                    validation_errors.push(format!(
+                        "authorized token `{candidate}` is missing from session"
+                    ));
                     restored_text.push_str(candidate);
                 }
             }
             Err(error) => {
+                unresolved_tokens.push(candidate.to_string());
                 validation_errors.push(format!("malformed token `{candidate}`: {error}"));
                 restored_text.push_str(candidate);
             }
@@ -83,23 +90,10 @@ fn restore_text(
     }
     restored_text.push_str(&input[cursor..]);
 
-    let unresolved_tokens = token_like_ranges(&restored_text)
-        .into_iter()
-        .map(|range| restored_text[range].to_string())
-        .filter(|candidate| is_v2_token_like(candidate))
-        .collect::<Vec<_>>();
-
-    if !unresolved_tokens.is_empty() {
-        validation_errors.extend(
-            unresolved_tokens
-                .iter()
-                .map(|candidate| format!("unresolved token remained after restore: `{candidate}`")),
-        );
-    }
-
     RestoreResult {
         restored_text,
         restored_count,
+        skipped_tokens,
         unresolved_tokens,
         validation_errors,
     }
@@ -172,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_preserves_unknown_token_validation() {
+    fn restore_skips_unknown_unpermitted_token() {
         let redactor = domain_redactor();
         let session = redactor
             .redact_with_session("host=service.example.com")
@@ -183,14 +177,12 @@ mod tests {
             &session,
         );
 
-        assert!(restored.validation_errors.iter().any(
-            |message| message.contains("unknown token") || message.contains("unresolved token")
-        ));
-        assert_eq!(restored.unresolved_tokens, vec![unknown]);
+        assert!(restored.is_valid());
+        assert_eq!(restored.skipped_tokens, vec![unknown]);
     }
 
     #[test]
-    fn restore_rejects_scope_mismatch() {
+    fn restore_skips_scope_mismatch() {
         let redactor = domain_redactor();
         let left = redactor
             .redact_with_session("host=service.example.com")
@@ -200,12 +192,7 @@ mod tests {
             .expect("right session");
         let restored = restore_text_with_session(&left.redacted_text, &right);
 
-        assert!(!restored.is_valid());
-        assert!(
-            restored
-                .validation_errors
-                .iter()
-                .any(|message| message.contains("does not belong to session scope"))
-        );
+        assert!(restored.is_valid());
+        assert_eq!(restored.skipped_tokens, vec![left.entries[0].token.clone()]);
     }
 }

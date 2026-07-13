@@ -1,7 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
+pub use crate::session_types::{
+    RedactionSession, RestorationEntry, RestorePermit, RestoreResult, SessionEntrySummary,
+    SessionSummary,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
     Secret,
@@ -18,6 +24,7 @@ pub enum FindingKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default)]
 pub struct RedactionRules {
     pub secret: bool,
@@ -85,6 +92,7 @@ impl RedactionRules {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CustomStringMatch {
     #[default]
@@ -94,6 +102,7 @@ pub enum CustomStringMatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CustomStringScope {
     #[default]
@@ -102,6 +111,7 @@ pub enum CustomStringScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CustomStringRule {
     pub pattern: String,
     #[serde(default)]
@@ -111,11 +121,13 @@ pub struct CustomStringRule {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CustomFileRule {
     pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RedactionPolicy {
     #[serde(flatten)]
     pub rules: RedactionRules,
@@ -382,61 +394,4 @@ pub struct RedactionResult {
 pub struct RedactionArtifact {
     pub result: RedactionResult,
     pub session: RedactionSession,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RestorationEntry {
-    pub token: String,
-    pub kind: FindingKind,
-    pub original: String,
-    pub replacement_hint: Option<String>,
-    pub occurrences: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RedactionSession {
-    pub version: u32,
-    pub session_id: String,
-    pub scope_id: String,
-    pub external_id: Option<String>,
-    pub fingerprint: String,
-    pub redacted_fingerprint: String,
-    pub redacted_text: String,
-    #[serde(default)]
-    pub policy: RedactionPolicy,
-    pub entries: Vec<RestorationEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RestoreResult {
-    pub restored_text: String,
-    pub restored_count: usize,
-    pub unresolved_tokens: Vec<String>,
-    pub validation_errors: Vec<String>,
-}
-
-impl RestoreResult {
-    pub fn is_valid(&self) -> bool {
-        self.validation_errors.is_empty() && self.unresolved_tokens.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionEntrySummary {
-    pub token: String,
-    pub kind: FindingKind,
-    pub replacement_hint: Option<String>,
-    pub occurrences: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionSummary {
-    pub version: u32,
-    pub session_id: String,
-    pub scope_id: String,
-    pub external_id: Option<String>,
-    pub fingerprint: String,
-    pub redacted_fingerprint: String,
-    pub entry_count: usize,
-    pub entries: Vec<SessionEntrySummary>,
 }

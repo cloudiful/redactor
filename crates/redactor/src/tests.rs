@@ -1,8 +1,8 @@
 use crate::{
     CustomFileRule, CustomStringMatch, CustomStringRule, CustomStringScope, FindingKind, InputKind,
-    RedactionPolicy, Redactor, RedactorBuilder, SessionStore, StoredSession,
-    decrypt_session_from_str, encrypt_session_to_string, redact_text_artifact_with_stateful_session,
-    restore_text_from_store,
+    RedactionPolicy, Redactor, RedactorBuilder, SessionStore, SessionStoreError, StoredSession,
+    create_restore_permit, decrypt_session_from_str, encrypt_session_to_string,
+    redact_text_artifact_with_stateful_session, restore_text_from_store,
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -118,8 +118,12 @@ struct MemorySessionStore {
     sessions: Arc<Mutex<BTreeMap<String, StoredSession>>>,
 }
 
+#[async_trait::async_trait]
 impl SessionStore for MemorySessionStore {
-    fn load_latest(&self, external_id: &str) -> anyhow::Result<Option<StoredSession>> {
+    async fn load_latest(
+        &self,
+        external_id: &str,
+    ) -> Result<Option<StoredSession>, SessionStoreError> {
         Ok(self
             .sessions
             .lock()
@@ -128,22 +132,21 @@ impl SessionStore for MemorySessionStore {
             .cloned())
     }
 
-    fn save_latest(
+    async fn save_latest(
         &self,
         external_id: &str,
         session: &crate::RedactionSession,
         expected_version: Option<&str>,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> Result<String, SessionStoreError> {
         let mut sessions = self.sessions.lock().expect("lock");
         let current = sessions.get(external_id).cloned();
         match (current.as_ref(), expected_version) {
             (None, None) => {}
-            (Some(stored), Some(expected)) if stored.version.as_deref() == Some(expected) => {}
-            _ => anyhow::bail!("version_conflict"),
+            (Some(stored), Some(expected)) if stored.version == expected => {}
+            _ => return Err(SessionStoreError::Conflict),
         }
         let next_version = current
-            .and_then(|stored| stored.version)
-            .and_then(|value| value.parse::<u64>().ok())
+            .and_then(|stored| stored.version.parse::<u64>().ok())
             .map(|value| value + 1)
             .unwrap_or(1)
             .to_string();
@@ -151,15 +154,15 @@ impl SessionStore for MemorySessionStore {
             external_id.to_string(),
             StoredSession {
                 session: session.clone(),
-                version: Some(next_version.clone()),
+                version: next_version.clone(),
             },
         );
-        Ok(Some(next_version))
+        Ok(next_version)
     }
 }
 
-#[test]
-fn stateful_sessions_reuse_tokens_for_same_external_id() {
+#[tokio::test]
+async fn stateful_sessions_reuse_tokens_for_same_external_id() {
     let redactor = domain_redactor();
     let store = MemorySessionStore::default();
     let first = redact_text_artifact_with_stateful_session(
@@ -169,6 +172,7 @@ fn stateful_sessions_reuse_tokens_for_same_external_id() {
         "conv-1",
         &store,
     )
+    .await
     .expect("first artifact");
     let second = redact_text_artifact_with_stateful_session(
         &redactor,
@@ -177,6 +181,7 @@ fn stateful_sessions_reuse_tokens_for_same_external_id() {
         "conv-1",
         &store,
     )
+    .await
     .expect("second artifact");
 
     assert_eq!(first.session.external_id.as_deref(), Some("conv-1"));
@@ -239,8 +244,8 @@ fn session_redactor_imports_prior_session_once() {
     assert!(redacted.contains(&prior.entries[0].token));
 }
 
-#[test]
-fn stateful_sessions_do_not_share_scope_between_external_ids() {
+#[tokio::test]
+async fn stateful_sessions_do_not_share_scope_between_external_ids() {
     let redactor = domain_redactor();
     let store = MemorySessionStore::default();
     let left = redact_text_artifact_with_stateful_session(
@@ -250,6 +255,7 @@ fn stateful_sessions_do_not_share_scope_between_external_ids() {
         "conv-left",
         &store,
     )
+    .await
     .expect("left artifact");
     let right = redact_text_artifact_with_stateful_session(
         &redactor,
@@ -258,14 +264,18 @@ fn stateful_sessions_do_not_share_scope_between_external_ids() {
         "conv-right",
         &store,
     )
+    .await
     .expect("right artifact");
 
     assert_ne!(left.session.scope_id, right.session.scope_id);
-    assert_ne!(left.session.entries[0].token, right.session.entries[0].token);
+    assert_ne!(
+        left.session.entries[0].token,
+        right.session.entries[0].token
+    );
 }
 
-#[test]
-fn stateful_restore_uses_latest_snapshot() {
+#[tokio::test]
+async fn stateful_restore_uses_latest_snapshot() {
     let redactor = domain_redactor();
     let store = MemorySessionStore::default();
     let artifact = redact_text_artifact_with_stateful_session(
@@ -275,10 +285,18 @@ fn stateful_restore_uses_latest_snapshot() {
         "conv-restore",
         &store,
     )
+    .await
     .expect("artifact");
 
-    let restored = restore_text_from_store(&redactor, &artifact.result.redacted_text, "conv-restore", &store)
-        .expect("restore");
+    let permit = create_restore_permit(&artifact.session);
+    let restored = restore_text_from_store(
+        &artifact.result.redacted_text,
+        "conv-restore",
+        &store,
+        &[permit],
+    )
+    .await
+    .expect("restore");
     assert!(restored.is_valid());
     assert_eq!(
         restored.restored_text,
@@ -533,11 +551,7 @@ fn git_diff_mode_redacts_domains_with_psl_suffixes_outside_old_allowlist() {
         .redact_with_input_kind(diff, InputKind::GitDiff)
         .expect("redact diff");
 
-    assert!(
-        result
-            .redacted_text
-            .contains("+public_host=[[RDX:v2:")
-    );
+    assert!(result.redacted_text.contains("+public_host=[[RDX:v2:"));
     assert!(result.redacted_text.contains(":DOMAIN:002:"));
 }
 

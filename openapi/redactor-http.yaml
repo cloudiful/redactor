@@ -1,147 +1,314 @@
 openapi: 3.1.0
 info:
   title: Redactor HTTP API
-  version: 0.2.0
-  description: Standalone text redaction and restoration endpoints exposed by redactor-http.
-servers:
-  - url: http://127.0.0.1:8787
+  description: Structured text redaction, permit-scoped restoration, and authenticated session inspection.
+  version: 0.4.0
 paths:
   /healthz:
     get:
-      summary: Health check
       operationId: healthz
       responses:
-        "200":
-          description: Service is ready
+        '200':
+          description: ''
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  status:
-                    type: string
-                    const: ok
-                required: [status]
-  /redact/text:
-    post:
-      summary: Redact text and return an encrypted session blob
-      operationId: redactText
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RedactTextRequest"
-      responses:
-        "200":
-          description: Redaction succeeded
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RedactTextResponse"
-        "500":
-          description: Redaction failed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /restore/text:
-    post:
-      summary: Restore text using a previously issued encrypted session blob
-      operationId: restoreText
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RestoreTextRequest"
-      responses:
-        "200":
-          description: Restore succeeded
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RestoreResult"
-        "422":
-          description: Restore validation failed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/HealthResponse'
   /inspect/session:
     post:
-      summary: Inspect an encrypted session without exposing original plaintext values
-      operationId: inspectSession
+      operationId: inspect_session
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/InspectSessionRequest"
+              $ref: '#/components/schemas/InspectSessionRequest'
+        required: true
       responses:
-        "200":
-          description: Session metadata
+        '200':
+          description: ''
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionSummary"
-        "422":
-          description: Invalid encrypted session payload
+                $ref: '#/components/schemas/SessionSummary'
+        '422':
+          description: ''
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /redact/text:
+    post:
+      operationId: redact_text
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedactTextRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedactTextResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /restore/text:
+    post:
+      operationId: restore_text
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreTextRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreResult'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
-    RedactTextRequest:
+    CustomFileRule:
       type: object
-      additionalProperties: false
+      required:
+      - path
       properties:
-        text:
+        path:
           type: string
-        input_kind:
-          $ref: "#/components/schemas/InputKind"
-          default: text
-        redaction:
-          $ref: "#/components/schemas/RedactionRules"
-      required: [text]
-    RestoreTextRequest:
+    CustomStringMatch:
+      type: string
+      enum:
+      - exact
+      - contains
+      - regex
+    CustomStringRule:
       type: object
-      additionalProperties: false
+      required:
+      - pattern
       properties:
-        text:
+        match_type:
+          $ref: '#/components/schemas/CustomStringMatch'
+        pattern:
           type: string
-        encrypted_session:
+        scope:
+          $ref: '#/components/schemas/CustomStringScope'
+    CustomStringScope:
+      type: string
+      enum:
+      - text
+      - line
+    ErrorEnvelope:
+      type: object
+      required:
+      - message
+      - kind
+      properties:
+        kind:
           type: string
-      required: [text, encrypted_session]
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorEnvelope'
+    FindingKind:
+      type: string
+      enum:
+      - secret
+      - domain
+      - url
+      - email
+      - ip
+      - cidr
+      - phone
+      - person
+      - organization
+      - custom_string
+      - custom_file
+    HealthResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+    InputKind:
+      type: string
+      enum:
+      - text
+      - git_diff
     InspectSessionRequest:
       type: object
-      additionalProperties: false
+      required:
+      - encrypted_session
       properties:
         encrypted_session:
           type: string
-      required: [encrypted_session]
+      additionalProperties: false
+    RedactTextRequest:
+      type: object
+      required:
+      - text
+      properties:
+        external_id:
+          type:
+          - string
+          - 'null'
+        input_kind:
+          $ref: '#/components/schemas/InputKind'
+        redaction:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RedactionPolicy'
+        source_path:
+          type:
+          - string
+          - 'null'
+        text:
+          type: string
+      additionalProperties: false
     RedactTextResponse:
       type: object
-      additionalProperties: false
+      required:
+      - redacted_text
+      - encrypted_session
+      - restore_permit
+      - session_summary
       properties:
-        redacted_text:
-          type: string
         encrypted_session:
           type: string
+        redacted_text:
+          type: string
+        restore_permit:
+          type: string
         session_summary:
-          $ref: "#/components/schemas/SessionSummary"
-      required: [redacted_text, encrypted_session, session_summary]
+          $ref: '#/components/schemas/SessionSummary'
+    RedactionPolicy:
+      allOf:
+      - $ref: '#/components/schemas/RedactionRules'
+      - type: object
+        properties:
+          custom_files:
+            type: array
+            items:
+              $ref: '#/components/schemas/CustomFileRule'
+          custom_strings:
+            type: array
+            items:
+              $ref: '#/components/schemas/CustomStringRule'
+    RedactionRules:
+      type: object
+      properties:
+        cidr:
+          type: boolean
+          default: true
+        domain:
+          type: boolean
+          default: false
+        email:
+          type: boolean
+          default: true
+        ip:
+          type: boolean
+          default: true
+        organization:
+          type: boolean
+          default: false
+        person:
+          type: boolean
+          default: false
+        phone:
+          type: boolean
+          default: false
+        secret:
+          type: boolean
+          default: false
+        url:
+          type: boolean
+          default: false
     RestoreResult:
       type: object
-      additionalProperties: false
+      required:
+      - restored_text
+      - restored_count
+      - skipped_tokens
+      - unresolved_tokens
+      - validation_errors
       properties:
-        restored_text:
-          type: string
         restored_count:
           type: integer
           minimum: 0
+        restored_text:
+          type: string
+        skipped_tokens:
+          type: array
+          items:
+            type: string
         unresolved_tokens:
           type: array
           items:
@@ -150,94 +317,76 @@ components:
           type: array
           items:
             type: string
-      required: [restored_text, restored_count, unresolved_tokens, validation_errors]
+    RestoreTextRequest:
+      type: object
+      required:
+      - text
+      - restore_permits
+      properties:
+        encrypted_session:
+          type:
+          - string
+          - 'null'
+        external_id:
+          type:
+          - string
+          - 'null'
+        restore_permits:
+          type: array
+          items:
+            type: string
+        text:
+          type: string
+      additionalProperties: false
+    SessionEntrySummary:
+      type: object
+      required:
+      - token
+      - kind
+      - occurrences
+      properties:
+        kind:
+          $ref: '#/components/schemas/FindingKind'
+        occurrences:
+          type: integer
+          minimum: 0
+        replacement_hint:
+          type:
+          - string
+          - 'null'
+        token:
+          type: string
     SessionSummary:
       type: object
-      additionalProperties: false
+      required:
+      - version
+      - session_id
+      - scope_id
+      - fingerprint
+      - redacted_fingerprint
+      - entry_count
+      - entries
       properties:
-        version:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionEntrySummary'
+        entry_count:
           type: integer
-        session_id:
-          type: string
+          minimum: 0
+        external_id:
+          type:
+          - string
+          - 'null'
         fingerprint:
           type: string
         redacted_fingerprint:
           type: string
-        entry_count:
-          type: integer
-          minimum: 0
-        entries:
-          type: array
-          items:
-            $ref: "#/components/schemas/SessionEntrySummary"
-      required:
-        - version
-        - session_id
-        - fingerprint
-        - redacted_fingerprint
-        - entry_count
-        - entries
-    SessionEntrySummary:
-      type: object
-      additionalProperties: false
-      properties:
-        token:
+        scope_id:
           type: string
-        kind:
+        session_id:
           type: string
-        replacement_hint:
-          type:
-            - string
-            - "null"
-        occurrences:
+        version:
           type: integer
+          format: int32
           minimum: 0
-      required: [token, kind, replacement_hint, occurrences]
-    ErrorResponse:
-      type: object
-      additionalProperties: false
-      properties:
-        error:
-          type: object
-          additionalProperties: false
-          properties:
-            message:
-              type: string
-            kind:
-              type: string
-          required: [message, kind]
-      required: [error]
-    InputKind:
-      type: string
-      enum: [text, git_diff]
-    RedactionRules:
-      type: object
-      additionalProperties: false
-      properties:
-        secret:
-          type: boolean
-          default: true
-        domain:
-          type: boolean
-          default: false
-        url:
-          type: boolean
-          default: true
-        email:
-          type: boolean
-          default: true
-        ip:
-          type: boolean
-          default: true
-        cidr:
-          type: boolean
-          default: true
-        phone:
-          type: boolean
-          default: true
-        person:
-          type: boolean
-          default: false
-        organization:
-          type: boolean
-          default: true

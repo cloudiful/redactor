@@ -17,16 +17,16 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 
 COPY --from=planner /app/recipe.json recipe.json
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
     CARGO_TARGET_DIR=/app/target cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
-    CARGO_TARGET_DIR=/app/target cargo build --release --package redactor-app --bin redactor --features proxy \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    CARGO_TARGET_DIR=/app/target cargo build --release --package redactor-app --bin redactor --features http \
     && install -D /app/target/release/redactor /artifacts/redactor
 
 FROM debian:trixie-slim AS runtime
@@ -50,4 +50,4 @@ USER 65532:65532
 EXPOSE 8787
 
 ENTRYPOINT ["/usr/local/bin/redactor"]
-CMD ["proxy", "--config", "/etc/redactor/redactor.toml"]
+CMD ["serve", "--config", "/etc/redactor/redactor.toml"]

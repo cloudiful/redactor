@@ -26,5 +26,5 @@ optional = true
 [features]
 default = []
 ollama = ["redactor/ollama"]
-proxy = ["dep:redactor-http", "dep:tokio"]
+http = ["dep:redactor-http", "dep:tokio"]
 valkey-session-store = ["redactor-http/valkey-session-store"]

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use redactor::{
-    RedactorBuilder, decrypt_redaction_session, ensure_restore_valid,
+    RestoreContext, decrypt_permits, decrypt_redaction_session, ensure_restore_valid,
     restore_text_from_encrypted_session,
 };
 
@@ -16,7 +16,7 @@ use crate::support::resolve_session_passphrase;
 pub(crate) struct RestoreCommand {
     pub(crate) input: InputArgs,
     pub(crate) session: PathBuf,
-    pub(crate) external_id: Option<String>,
+    pub(crate) permits: Vec<PathBuf>,
     pub(crate) patch: Option<PathBuf>,
     pub(crate) report: ReportArgs,
     pub(crate) session_passphrase: SessionPassphraseArgs,
@@ -25,22 +25,25 @@ pub(crate) struct RestoreCommand {
 }
 
 pub(crate) fn run(command: RestoreCommand) -> Result<()> {
-    if command.external_id.is_some() {
-        return Err(anyhow::anyhow!(
-            "external_id stateful restore requires an injected session store provider; the CLI does not ship a built-in provider"
-        ));
-    }
     let passphrase = resolve_session_passphrase(command.session_passphrase)?;
     let encrypted = fs::read_to_string(&command.session)
         .with_context(|| format!("failed to read session file {}", command.session.display()))?;
-    let redactor = RedactorBuilder::new().build();
+    let encrypted_permits = command
+        .permits
+        .iter()
+        .map(|path| {
+            fs::read_to_string(path)
+                .with_context(|| format!("failed to read restore permit {}", path.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let restore_result = if let Some(patch_path) = command.patch {
         let session = decrypt_redaction_session(&encrypted, &passphrase)
             .context("failed to load encrypted session")?;
         let patch_text = fs::read_to_string(&patch_path)
             .with_context(|| format!("failed to read patch file {}", patch_path.display()))?;
-        let result = redactor.restore_patch(&patch_text, &session);
+        let permits = decrypt_permits(&encrypted_permits, &passphrase)?;
+        let result = RestoreContext::with_permits(&session, &permits)?.restore_text(&patch_text);
         if !command.skip_apply_check {
             let repo_root = command
                 .repo
@@ -50,7 +53,7 @@ pub(crate) fn run(command: RestoreCommand) -> Result<()> {
         result
     } else {
         let text = read_input(command.input.input)?;
-        restore_text_from_encrypted_session(&redactor, &text, &encrypted, &passphrase)
+        restore_text_from_encrypted_session(&text, &encrypted, &encrypted_permits, &passphrase)
             .context("failed to restore text from encrypted session")?
     };
 

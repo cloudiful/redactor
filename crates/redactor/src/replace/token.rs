@@ -86,10 +86,6 @@ pub(crate) fn token_like_ranges(text: &str) -> Vec<Range<usize>> {
     ranges
 }
 
-pub(crate) fn is_v2_token_like(candidate: &str) -> bool {
-    candidate.starts_with(TOKEN_PREFIX)
-}
-
 pub(crate) fn random_scope_id() -> String {
     random_id_with_len(8)
 }

@@ -14,9 +14,7 @@ phone = true
 person = false
 organization = true
 
-[proxy]
+[http]
 listen = "0.0.0.0:8787"
-upstream = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
 session_passphrase_env = "REDACTOR_SESSION_PASSPHRASE"
 cors_allowed_origins = []

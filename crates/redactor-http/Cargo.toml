@@ -14,10 +14,15 @@ anyhow.workspace = true
 axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
+secrecy.workspace = true
 server.workspace = true
 tokio.workspace = true
-redactor = { package = "cloudiful-redactor", path = "../redactor" }
+utoipa.workspace = true
+utoipa-axum.workspace = true
+redactor = { package = "cloudiful-redactor", path = "../redactor", features = ["openapi"] }
 redactor-session-store-valkey = { path = "../redactor-session-store-valkey", optional = true }
 
 [dev-dependencies]
+async-trait.workspace = true
 tower.workspace = true

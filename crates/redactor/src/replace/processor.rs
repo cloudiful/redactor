@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::RedactorError;
 use crate::types::{
@@ -156,6 +156,14 @@ impl ReplacementProcessor {
             })
             .collect::<Vec<_>>();
 
+        let issued_tokens = self
+            .applied_replacements
+            .iter()
+            .map(|replacement| replacement.replacement.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
         RedactionSession {
             version: 2,
             session_id: random_id(),
@@ -166,6 +174,7 @@ impl ReplacementProcessor {
             redacted_text: redacted_text.to_string(),
             policy: policy.clone(),
             entries,
+            issued_tokens,
         }
     }
 

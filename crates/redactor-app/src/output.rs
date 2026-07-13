@@ -8,6 +8,7 @@ use crate::cli::ReportFormat;
 pub(crate) struct SanitizedRedactionOutput {
     pub(crate) redacted_text: String,
     pub(crate) session_file: Option<String>,
+    pub(crate) restore_permit_file: Option<String>,
     pub(crate) stats: RedactionStats,
 }
 

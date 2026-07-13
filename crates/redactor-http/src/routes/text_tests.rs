@@ -1,18 +1,21 @@
 use axum::body::Body;
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode};
-use redactor::{RedactionSession, SessionStore, StoredSession};
+use redactor::{RedactionSession, SessionStore, SessionStoreError, StoredSession};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 
-use crate::{ProxyConfig, app};
+use crate::{HttpServerConfig, app};
+
+const PASSPHRASE: &str = "test-passphrase-with-at-least-32-bytes";
 
 #[derive(Debug, Deserialize)]
 struct TestRedactResponse {
     redacted_text: String,
     encrypted_session: String,
+    restore_permit: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,8 +28,12 @@ struct MemorySessionStore {
     sessions: Arc<Mutex<BTreeMap<String, StoredSession>>>,
 }
 
+#[async_trait::async_trait]
 impl SessionStore for MemorySessionStore {
-    fn load_latest(&self, external_id: &str) -> anyhow::Result<Option<StoredSession>> {
+    async fn load_latest(
+        &self,
+        external_id: &str,
+    ) -> Result<Option<StoredSession>, SessionStoreError> {
         Ok(self
             .sessions
             .lock()
@@ -35,22 +42,21 @@ impl SessionStore for MemorySessionStore {
             .cloned())
     }
 
-    fn save_latest(
+    async fn save_latest(
         &self,
         external_id: &str,
         session: &RedactionSession,
         expected_version: Option<&str>,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> Result<String, SessionStoreError> {
         let mut sessions = self.sessions.lock().expect("lock");
         let current = sessions.get(external_id).cloned();
         match (current.as_ref(), expected_version) {
             (None, None) => {}
-            (Some(stored), Some(expected)) if stored.version.as_deref() == Some(expected) => {}
-            _ => anyhow::bail!("version_conflict"),
+            (Some(stored), Some(expected)) if stored.version == expected => {}
+            _ => return Err(SessionStoreError::Conflict),
         }
         let next_version = current
-            .and_then(|stored| stored.version)
-            .and_then(|value| value.parse::<u64>().ok())
+            .and_then(|stored| stored.version.parse::<u64>().ok())
             .map(|value| value + 1)
             .unwrap_or(1)
             .to_string();
@@ -58,21 +64,19 @@ impl SessionStore for MemorySessionStore {
             external_id.to_string(),
             StoredSession {
                 session: session.clone(),
-                version: Some(next_version.clone()),
+                version: next_version.clone(),
             },
         );
-        Ok(Some(next_version))
+        Ok(next_version)
     }
 }
 
 #[tokio::test]
 async fn text_routes_round_trip() {
-    let app = app(ProxyConfig::new(
-        "127.0.0.1:0".to_string(),
-        None,
-        "IGNORED".to_string(),
+    let app = app(
+        HttpServerConfig::new("127.0.0.1:0".to_string(), None, "IGNORED".to_string())
+            .with_session_passphrase(PASSPHRASE),
     )
-    .with_session_passphrase("test-passphrase"))
     .expect("app");
 
     let redact = app
@@ -104,9 +108,10 @@ async fn text_routes_round_trip() {
             Request::post("/restore/text")
                 .header("content-type", "application/json")
                 .body(Body::from(format!(
-                    r#"{{"text":"{}","encrypted_session":{}}}"#,
+                    r#"{{"text":"{}","encrypted_session":{},"restore_permits":[{}]}}"#,
                     redact_json.redacted_text,
-                    serde_json::to_string(&redact_json.encrypted_session).expect("session string")
+                    serde_json::to_string(&redact_json.encrypted_session).expect("session string"),
+                    serde_json::to_string(&redact_json.restore_permit).expect("permit string")
                 )))
                 .expect("request"),
         )
@@ -138,12 +143,10 @@ async fn text_routes_round_trip() {
 
 #[tokio::test]
 async fn redact_text_leaves_domains_by_default() {
-    let app = app(ProxyConfig::new(
-        "127.0.0.1:0".to_string(),
-        None,
-        "IGNORED".to_string(),
+    let app = app(
+        HttpServerConfig::new("127.0.0.1:0".to_string(), None, "IGNORED".to_string())
+            .with_session_passphrase(PASSPHRASE),
     )
-    .with_session_passphrase("test-passphrase"))
     .expect("app");
 
     let redact = app
@@ -168,12 +171,10 @@ async fn redact_text_leaves_domains_by_default() {
 
 #[tokio::test]
 async fn redact_text_accepts_git_diff_mode() {
-    let app = app(ProxyConfig::new(
-        "127.0.0.1:0".to_string(),
-        None,
-        "IGNORED".to_string(),
+    let app = app(
+        HttpServerConfig::new("127.0.0.1:0".to_string(), None, "IGNORED".to_string())
+            .with_session_passphrase(PASSPHRASE),
     )
-    .with_session_passphrase("test-passphrase"))
     .expect("app");
     let diff = concat!(
         "diff --git a/.env b/.env\n",
@@ -208,24 +209,16 @@ async fn redact_text_accepts_git_diff_mode() {
             .redacted_text
             .contains("diff --git a/.env b/.env")
     );
-    assert!(
-        redact_json
-            .redacted_text
-            .contains("+API_TOKEN=[[RDX:v2:")
-    );
+    assert!(redact_json.redacted_text.contains("+API_TOKEN=[[RDX:v2:"));
 }
 
 #[tokio::test]
 async fn text_routes_support_external_id_with_store_provider() {
     let store = Arc::new(MemorySessionStore::default());
     let app = app(
-        ProxyConfig::new(
-            "127.0.0.1:0".to_string(),
-            None,
-            "IGNORED".to_string(),
-        )
-        .with_session_passphrase("test-passphrase")
-        .with_session_store(store),
+        HttpServerConfig::new("127.0.0.1:0".to_string(), None, "IGNORED".to_string())
+            .with_session_passphrase(PASSPHRASE)
+            .with_session_store(store),
     )
     .expect("app");
 
@@ -254,8 +247,9 @@ async fn text_routes_support_external_id_with_store_provider() {
             Request::post("/restore/text")
                 .header("content-type", "application/json")
                 .body(Body::from(format!(
-                    r#"{{"text":{},"external_id":"conv-1"}}"#,
-                    serde_json::to_string(&redact_json.redacted_text).expect("text json")
+                    r#"{{"text":{},"external_id":"conv-1","restore_permits":[{}]}}"#,
+                    serde_json::to_string(&redact_json.redacted_text).expect("text json"),
+                    serde_json::to_string(&redact_json.restore_permit).expect("permit json")
                 )))
                 .expect("request"),
         )
@@ -267,12 +261,8 @@ async fn text_routes_support_external_id_with_store_provider() {
 #[tokio::test]
 async fn text_routes_reject_external_id_without_store_provider() {
     let app = app(
-        ProxyConfig::new(
-            "127.0.0.1:0".to_string(),
-            None,
-            "IGNORED".to_string(),
-        )
-        .with_session_passphrase("test-passphrase"),
+        HttpServerConfig::new("127.0.0.1:0".to_string(), None, "IGNORED".to_string())
+            .with_session_passphrase(PASSPHRASE),
     )
     .expect("app");
 
