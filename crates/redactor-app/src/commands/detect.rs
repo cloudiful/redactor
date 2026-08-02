@@ -14,7 +14,7 @@ pub(crate) fn run(
     source_path: Option<String>,
 ) -> Result<()> {
     let text = read_input(input.input)?;
-    let redactor = build_redactor(llm, policy);
+    let redactor = build_redactor(llm, policy).context("failed to build redaction engine")?;
     let input_kind = redactor::InputKind::from(input_kind.input_kind);
 
     let findings = if let Some(ref source) = source_path {

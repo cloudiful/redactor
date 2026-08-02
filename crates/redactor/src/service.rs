@@ -20,9 +20,7 @@ pub fn redact_text_artifact(
     text: &str,
     input_kind: InputKind,
 ) -> Result<RedactionArtifact> {
-    redactor
-        .redact_artifact_with_input_kind(text, input_kind)
-        .map_err(anyhow::Error::new)
+    redact_text_artifact_internal(redactor, text, input_kind, None, None, None)
 }
 
 pub fn redact_text_artifact_with_source(
@@ -31,9 +29,7 @@ pub fn redact_text_artifact_with_source(
     input_kind: InputKind,
     source_path: &str,
 ) -> Result<RedactionArtifact> {
-    redactor
-        .redact_artifact_with_input_kind_and_source(text, input_kind, Some(source_path))
-        .map_err(anyhow::Error::new)
+    redact_text_artifact_internal(redactor, text, input_kind, Some(source_path), None, None)
 }
 
 pub async fn redact_text_artifact_with_stateful_session(
@@ -45,14 +41,14 @@ pub async fn redact_text_artifact_with_stateful_session(
 ) -> Result<RedactionArtifact> {
     let external_id = require_external_id(Some(external_id))?;
     let (prior_session, expected_version) = load_stateful_session(store, external_id).await?;
-    let artifact = redactor
-        .redact_artifact_with_prior_session(
-            text,
-            input_kind,
-            prior_session.as_ref(),
-            Some(external_id),
-        )
-        .map_err(anyhow::Error::new)?;
+    let artifact = redact_text_artifact_internal(
+        redactor,
+        text,
+        input_kind,
+        None,
+        prior_session.as_ref(),
+        Some(external_id),
+    )?;
     save_stateful_session(
         store,
         external_id,
@@ -73,15 +69,14 @@ pub async fn redact_text_artifact_with_source_and_stateful_session(
 ) -> Result<RedactionArtifact> {
     let external_id = require_external_id(Some(external_id))?;
     let (prior_session, expected_version) = load_stateful_session(store, external_id).await?;
-    let artifact = redactor
-        .redact_artifact_with_input_kind_source_and_prior_session(
-            text,
-            input_kind,
-            Some(source_path),
-            prior_session.as_ref(),
-            Some(external_id),
-        )
-        .map_err(anyhow::Error::new)?;
+    let artifact = redact_text_artifact_internal(
+        redactor,
+        text,
+        input_kind,
+        Some(source_path),
+        prior_session.as_ref(),
+        Some(external_id),
+    )?;
     save_stateful_session(
         store,
         external_id,
@@ -100,19 +95,7 @@ pub fn redact_text_with_encrypted_session(
 ) -> Result<EncryptedRedactionArtifact> {
     let artifact =
         redact_text_artifact(redactor, text, input_kind).context("failed to redact text input")?;
-    let encrypted_session = encrypt_session_to_string(&artifact.session, passphrase)
-        .context("failed to encrypt redaction session")?;
-    let restore_permit =
-        encrypt_restore_permit(&create_restore_permit(&artifact.session), passphrase)
-            .context("failed to encrypt restore permit")?;
-    let session_summary = crate::SessionSummary::from(&artifact.session);
-
-    Ok(EncryptedRedactionArtifact {
-        artifact,
-        encrypted_session,
-        restore_permit,
-        session_summary,
-    })
+    encrypt_artifact(artifact, passphrase)
 }
 
 pub fn redact_text_with_encrypted_session_and_source(
@@ -124,6 +107,32 @@ pub fn redact_text_with_encrypted_session_and_source(
 ) -> Result<EncryptedRedactionArtifact> {
     let artifact = redact_text_artifact_with_source(redactor, text, input_kind, source_path)
         .context("failed to redact text input")?;
+    encrypt_artifact(artifact, passphrase)
+}
+
+fn redact_text_artifact_internal(
+    redactor: &Redactor,
+    text: &str,
+    input_kind: InputKind,
+    source_path: Option<&str>,
+    prior_session: Option<&RedactionSession>,
+    external_id: Option<&str>,
+) -> Result<RedactionArtifact> {
+    redactor
+        .redact_artifact_with_input_kind_source_and_prior_session(
+            text,
+            input_kind,
+            source_path,
+            prior_session,
+            external_id,
+        )
+        .map_err(anyhow::Error::new)
+}
+
+fn encrypt_artifact(
+    artifact: RedactionArtifact,
+    passphrase: &str,
+) -> Result<EncryptedRedactionArtifact> {
     let encrypted_session = encrypt_session_to_string(&artifact.session, passphrase)
         .context("failed to encrypt redaction session")?;
     let restore_permit =
@@ -237,7 +246,8 @@ mod tests {
                     .with_kind(FindingKind::Secret, true)
                     .with_kind(FindingKind::Url, true),
             )
-            .build()
+            .try_build()
+            .expect("test policy is valid")
     }
 
     #[test]

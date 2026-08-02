@@ -61,14 +61,8 @@ impl ReplacementProcessor {
             return Ok(processor);
         };
 
-        if let Some(expected) = external_id
-            && let Some(existing) = prior_session.external_id.as_deref()
-            && existing != expected
-        {
-            return Err(RedactorError::Validation(format!(
-                "prior session external_id `{existing}` does not match requested external_id `{expected}`"
-            )));
-        }
+        crate::session::validate_prior_session(prior_session, external_id)
+            .map_err(|error| RedactorError::Validation(error.to_string()))?;
 
         processor.state.scope_id = prior_session.scope_id.clone();
         if processor.state.external_id.is_none() {
@@ -77,12 +71,6 @@ impl ReplacementProcessor {
 
         for entry in &prior_session.entries {
             let parsed = parse_token(&entry.token).map_err(RedactorError::Validation)?;
-            if parsed.scope_id != processor.state.scope_id {
-                return Err(RedactorError::Validation(format!(
-                    "session entry token scope `{}` does not match session scope `{}`",
-                    parsed.scope_id, processor.state.scope_id
-                )));
-            }
 
             let counter = processor.state.counters.entry(parsed.kind).or_insert(0);
             *counter = (*counter).max(parsed.counter);

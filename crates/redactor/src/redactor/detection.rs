@@ -35,6 +35,7 @@ pub(super) fn detect_internal(
         text,
         &redactor.compiled_policy.policy,
         &redactor.compiled_policy.custom_strings,
+        &redactor.compiled_policy.custom_files,
         &ranges,
     );
     let mut findings = result.findings;
@@ -44,7 +45,12 @@ pub(super) fn detect_internal(
     };
 
     if let Some(config) = &redactor.llm {
-        match crate::llm::discover_candidates(config, text, redactor.compiled_policy.policy.rules) {
+        match crate::llm::discover_candidates(
+            config,
+            text,
+            redactor.compiled_policy.policy.rules,
+            &ranges,
+        ) {
             Ok(mut llm_findings) => {
                 stats.llm_candidates_total += llm_findings.len();
                 findings.append(&mut llm_findings);

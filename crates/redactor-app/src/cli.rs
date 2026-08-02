@@ -259,7 +259,6 @@ pub(crate) fn run() -> Result<()> {
             let policy = resolve_redaction_policy(redaction, app_config.redaction)
                 .with_custom_strings(custom.custom_strings)
                 .with_custom_files(custom.custom_files);
-            policy.validate().map_err(|e| anyhow::anyhow!(e))?;
             commands::redact::run(commands::redact::RedactCommand {
                 input,
                 report,
@@ -301,7 +300,6 @@ pub(crate) fn run() -> Result<()> {
             let policy = resolve_redaction_policy(redaction, app_config.redaction)
                 .with_custom_strings(custom.custom_strings)
                 .with_custom_files(custom.custom_files);
-            policy.validate().map_err(|e| anyhow::anyhow!(e))?;
             commands::detect::run(
                 input,
                 report,

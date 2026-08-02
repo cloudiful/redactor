@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for RestoreState {
     }
 }
 
-fn validate_session(session: &RedactionSession) -> Result<()> {
+pub(crate) fn validate_session(session: &RedactionSession) -> Result<()> {
     if session.version != SESSION_VERSION {
         return Err(anyhow!(
             "unsupported redaction session version {}",
@@ -103,9 +103,16 @@ fn validate_session(session: &RedactionSession) -> Result<()> {
     }
 
     let mut entries = HashSet::new();
+    let mut mappings = HashSet::new();
     for entry in &session.entries {
         if !entries.insert(entry.token.as_str()) {
             return Err(anyhow!("duplicate session entry token `{}`", entry.token));
+        }
+        if !mappings.insert((entry.kind, entry.original.as_str())) {
+            return Err(anyhow!(
+                "duplicate session mapping for `{}`",
+                entry.original
+            ));
         }
         validate_entry(session, entry)?;
     }
@@ -120,6 +127,22 @@ fn validate_session(session: &RedactionSession) -> Result<()> {
                 "issued token `{token}` is missing from session entries"
             ));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_prior_session(
+    session: &RedactionSession,
+    external_id: Option<&str>,
+) -> Result<()> {
+    validate_session(session)?;
+    if let Some(expected) = external_id
+        && let Some(existing) = session.external_id.as_deref()
+        && existing != expected
+    {
+        return Err(anyhow!(
+            "prior session external_id `{existing}` does not match requested external_id `{expected}`"
+        ));
     }
     Ok(())
 }

@@ -1,9 +1,9 @@
 use regex::{Regex, RegexSet};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
+use crate::RedactorError;
 use crate::types::{
-    CustomFileRule, CustomStringMatch, CustomStringRule, CustomStringScope, Finding, FindingKind,
-    FindingSource,
+    CustomStringMatch, CustomStringRule, CustomStringScope, Finding, FindingKind, FindingSource,
 };
 
 use super::validators::normalize;
@@ -29,30 +29,37 @@ pub(crate) struct CompiledCustomStrings {
 }
 
 impl CompiledCustomStrings {
-    pub(crate) fn new(rules: &[CustomStringRule]) -> Self {
+    pub(crate) fn new(rules: &[CustomStringRule]) -> Result<Self, RedactorError> {
         let exact = compile_rule_set(rules, CustomStringMatch::Exact, |pattern| {
             regex::escape(pattern)
-        });
+        })?;
         let contains = compile_rule_set(rules, CustomStringMatch::Contains, |pattern| {
             format!("(?i:{})", regex::escape(pattern))
-        });
+        })?;
         let regex = rules
             .iter()
             .enumerate()
             .filter(|(_, rule)| rule.match_type == CustomStringMatch::Regex)
-            .filter_map(|(index, rule)| {
-                Regex::new(&rule.pattern).ok().map(|regex| CompiledRule {
-                    index,
-                    rule: rule.clone(),
-                    regex,
-                })
+            .map(|(index, rule)| {
+                Regex::new(&rule.pattern)
+                    .map(|regex| CompiledRule {
+                        index,
+                        rule: rule.clone(),
+                        regex,
+                    })
+                    .map_err(|error| {
+                        RedactorError::Validation(format!(
+                            "custom_strings[{index}]: invalid regex pattern: {} ({error})",
+                            rule.pattern
+                        ))
+                    })
             })
-            .collect();
-        Self {
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
             exact,
             contains,
             regex,
-        }
+        })
     }
 }
 
@@ -60,27 +67,42 @@ fn compile_rule_set(
     rules: &[CustomStringRule],
     match_type: CustomStringMatch,
     pattern_for: impl Fn(&str) -> String,
-) -> CompiledRuleSet {
+) -> Result<CompiledRuleSet, RedactorError> {
     let compiled = rules
         .iter()
         .enumerate()
         .filter(|(_, rule)| rule.match_type == match_type)
-        .filter_map(|(index, rule)| {
+        .map(|(index, rule)| {
             let pattern = pattern_for(&rule.pattern);
-            Regex::new(&pattern).ok().map(|regex| CompiledRule {
-                index,
-                rule: rule.clone(),
-                regex,
-            })
+            Regex::new(&pattern)
+                .map(|regex| CompiledRule {
+                    index,
+                    rule: rule.clone(),
+                    regex,
+                })
+                .map_err(|error| {
+                    RedactorError::Validation(format!(
+                        "custom_strings[{index}]: invalid pattern: {} ({error})",
+                        rule.pattern
+                    ))
+                })
         })
-        .collect::<Vec<_>>();
-    let set = (!compiled.is_empty())
-        .then(|| RegexSet::new(compiled.iter().map(|rule| rule.regex.as_str())).ok())
-        .flatten();
-    CompiledRuleSet {
+        .collect::<Result<Vec<_>, _>>()?;
+    let set = if compiled.is_empty() {
+        None
+    } else {
+        Some(
+            RegexSet::new(compiled.iter().map(|rule| rule.regex.as_str())).map_err(|error| {
+                RedactorError::Validation(format!(
+                    "failed to compile custom string rule set: {error}"
+                ))
+            })?,
+        )
+    };
+    Ok(CompiledRuleSet {
         set,
         rules: compiled,
-    }
+    })
 }
 
 pub(crate) fn detect_custom_strings(text: &str, compiled: &CompiledCustomStrings) -> Vec<Finding> {
@@ -171,9 +193,9 @@ fn push_custom_string_finding(
 pub(crate) fn detect_custom_files(
     text: &str,
     ranges: &[super::super::input::RedactableRange],
-    rules: &[CustomFileRule],
+    paths: &HashSet<String>,
 ) -> Vec<Finding> {
-    if rules.is_empty() {
+    if paths.is_empty() {
         return Vec::new();
     }
 
@@ -182,7 +204,7 @@ pub(crate) fn detect_custom_files(
         let Some(ref file_path) = range_info.file_path else {
             continue;
         };
-        if !rules.iter().any(|rule| rule.path == file_path.as_str()) {
+        if !paths.contains(file_path) {
             continue;
         }
 

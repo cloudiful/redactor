@@ -24,5 +24,6 @@ pub use restore::{
     RestoreContext, ensure_restore_valid, restore_patch_with_session, restore_text_with_session,
 };
 pub use state::RestoreState;
+pub(crate) use state::validate_prior_session;
 pub use store::{SessionStore, SessionStoreError, StoredSession, require_external_id};
 pub use streaming_restore::StreamingRestoreContext;

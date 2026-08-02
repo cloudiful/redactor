@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, anyhow};
 
-use crate::replace::{parse_token, token_like_ranges};
+use crate::replace::{parse_token, scan_token_like_ranges};
 use crate::types::{RedactionSession, RestorePermit, RestoreResult};
 
 use super::permit::authorized_tokens;
@@ -60,7 +60,7 @@ fn restore_text(
     let mut validation_errors = Vec::new();
     let mut cursor = 0;
 
-    for token_range in token_like_ranges(input) {
+    scan_token_like_ranges(input, |token_range| {
         restored_text.push_str(&input[cursor..token_range.start]);
         let candidate = &input[token_range.clone()];
         match parse_token(candidate) {
@@ -87,7 +87,7 @@ fn restore_text(
             }
         }
         cursor = token_range.end;
-    }
+    });
     restored_text.push_str(&input[cursor..]);
 
     RestoreResult {
@@ -194,5 +194,20 @@ mod tests {
 
         assert!(restored.is_valid());
         assert_eq!(restored.skipped_tokens, vec![left.entries[0].token.clone()]);
+    }
+
+    #[test]
+    fn restore_limits_unterminated_token_candidates() {
+        let input = format!("{}{}tail", crate::replace::TOKEN_PREFIX, "x".repeat(10_000));
+        let session = RedactorBuilder::new()
+            .build()
+            .redact_with_session("plain text")
+            .expect("session");
+
+        let restored = RestoreContext::new(&session).restore_text(&input);
+
+        assert_eq!(restored.restored_text, input);
+        assert_eq!(restored.unresolved_tokens.len(), 1);
+        assert!(restored.unresolved_tokens[0].len() <= crate::replace::TOKEN_PREFIX.len() + 4096);
     }
 }

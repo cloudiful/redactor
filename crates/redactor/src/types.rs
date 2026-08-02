@@ -6,7 +6,7 @@ pub use crate::session_types::{
     SessionSummary,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
@@ -55,6 +55,20 @@ impl Default for RedactionRules {
 }
 
 impl RedactionRules {
+    pub fn merged_with(self, other: Self) -> Self {
+        Self {
+            secret: self.secret || other.secret,
+            domain: self.domain || other.domain,
+            url: self.url || other.url,
+            email: self.email || other.email,
+            ip: self.ip || other.ip,
+            cidr: self.cidr || other.cidr,
+            phone: self.phone || other.phone,
+            person: self.person || other.person,
+            organization: self.organization || other.organization,
+        }
+    }
+
     pub fn with_kind(mut self, kind: FindingKind, enabled: bool) -> Self {
         self.set_kind(kind, enabled);
         self
@@ -91,7 +105,7 @@ impl RedactionRules {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CustomStringMatch {
@@ -101,7 +115,7 @@ pub enum CustomStringMatch {
     Regex,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CustomStringScope {
@@ -110,7 +124,7 @@ pub enum CustomStringScope {
     Line,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CustomStringRule {
     pub pattern: String,
@@ -167,18 +181,25 @@ impl RedactionPolicy {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_structure()?;
         for (index, rule) in self.custom_strings.iter().enumerate() {
-            if rule.pattern.is_empty() {
-                return Err(format!(
-                    "custom_strings[{index}]: pattern must not be empty"
-                ));
-            }
             if matches!(rule.match_type, CustomStringMatch::Regex)
                 && regex::Regex::new(&rule.pattern).is_err()
             {
                 return Err(format!(
                     "custom_strings[{index}]: invalid regex pattern: {}",
                     rule.pattern
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_structure(&self) -> Result<(), String> {
+        for (index, rule) in self.custom_strings.iter().enumerate() {
+            if rule.pattern.is_empty() {
+                return Err(format!(
+                    "custom_strings[{index}]: pattern must not be empty"
                 ));
             }
         }

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::input::RedactableRange;
 use crate::types::{Finding, RedactionPolicy, RedactionRules};
 
@@ -17,19 +19,20 @@ pub(crate) fn detect_with_policy(
     text: &str,
     policy: &RedactionPolicy,
     custom_strings: &CompiledCustomStrings,
+    custom_files: &HashSet<String>,
     ranges: &[RedactableRange],
 ) -> PolicyDetectionResult {
     let mut findings = Vec::new();
 
-    if !policy.custom_files.is_empty() {
-        findings.extend(detect_custom_files(text, ranges, &policy.custom_files));
+    if !custom_files.is_empty() {
+        findings.extend(detect_custom_files(text, ranges, custom_files));
     }
 
     for range_info in ranges {
         let file_matches_custom = range_info
             .file_path
             .as_ref()
-            .map(|p| policy.custom_files.iter().any(|f| f.path == p.as_str()))
+            .map(|p| custom_files.contains(p))
             .unwrap_or(false);
 
         if file_matches_custom {

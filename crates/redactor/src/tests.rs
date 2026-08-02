@@ -857,6 +857,12 @@ fn invalid_regex_in_custom_string_returns_validation_error() {
         scope: CustomStringScope::Text,
     });
     assert!(policy.validate().is_err());
+    assert!(
+        RedactorBuilder::new()
+            .with_redaction_policy(policy)
+            .try_build()
+            .is_err()
+    );
 }
 
 #[test]

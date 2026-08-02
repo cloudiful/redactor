@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     Finding, InputKind, LlmConfig, RedactionArtifact, RedactionPolicy, RedactionResult,
@@ -45,15 +45,31 @@ impl RedactorBuilder {
         self
     }
 
-    pub fn build(self) -> Redactor {
-        let custom_strings = crate::detect::CompiledCustomStrings::new(&self.policy.custom_strings);
-        Redactor {
+    pub fn try_build(self) -> Result<Redactor, RedactorError> {
+        self.policy
+            .validate_structure()
+            .map_err(RedactorError::Validation)?;
+        let custom_strings =
+            crate::detect::CompiledCustomStrings::new(&self.policy.custom_strings)?;
+        let custom_files = self
+            .policy
+            .custom_files
+            .iter()
+            .map(|rule| rule.path.clone())
+            .collect();
+        Ok(Redactor {
             llm: self.llm,
             compiled_policy: Arc::new(CompiledPolicy {
                 policy: self.policy,
                 custom_strings,
+                custom_files,
             }),
-        }
+        })
+    }
+
+    pub fn build(self) -> Redactor {
+        self.try_build()
+            .expect("redaction policy must be valid before building a redactor")
     }
 }
 
@@ -67,6 +83,7 @@ pub struct Redactor {
 struct CompiledPolicy {
     policy: RedactionPolicy,
     custom_strings: crate::detect::CompiledCustomStrings,
+    custom_files: HashSet<String>,
 }
 
 #[derive(Debug, Default)]

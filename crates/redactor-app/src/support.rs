@@ -47,17 +47,18 @@ pub(crate) fn resolve_llm_args(llm: LlmArgs, defaults: &LlmSettings) -> Resolved
     }
 }
 
-pub(crate) fn build_redactor(llm: ResolvedLlmArgs, policy: RedactionPolicy) -> Redactor {
+pub(crate) fn build_redactor(llm: ResolvedLlmArgs, policy: RedactionPolicy) -> Result<Redactor> {
     let builder = RedactorBuilder::new().with_redaction_policy(policy);
-    match llm.llm {
-        LlmMode::Off => builder.build(),
+    let redactor = match llm.llm {
+        LlmMode::Off => builder.try_build(),
         LlmMode::Ollama => builder
             .with_llm(LlmConfig {
                 base_url: llm.ollama_url,
                 model: llm.model,
             })
-            .build(),
-    }
+            .try_build(),
+    }?;
+    Ok(redactor)
 }
 
 pub(crate) fn resolve_passphrase(direct: Option<String>, env_name: &str) -> Result<String> {

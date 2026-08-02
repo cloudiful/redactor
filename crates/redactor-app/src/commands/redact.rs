@@ -25,7 +25,8 @@ pub(crate) struct RedactCommand {
 
 pub(crate) fn run(command: RedactCommand) -> Result<()> {
     let text = read_input(command.input.input)?;
-    let redactor = build_redactor(command.llm, command.policy);
+    let redactor =
+        build_redactor(command.llm, command.policy).context("failed to build redaction engine")?;
     let input_kind = InputKind::from(command.input_kind.input_kind);
 
     if let Some(path) = command.session_out {

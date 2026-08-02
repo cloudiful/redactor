@@ -2,11 +2,17 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range, time::Duration};
+
+#[cfg(feature = "ollama")]
+use std::io::Read;
 
 use crate::detect::normalize;
+use crate::input::RedactableRange;
 use crate::types::{Finding, FindingKind, FindingSource, RedactionRules};
+
+const LLM_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_LLM_RESPONSE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Default)]
 pub struct LlmConfig {
@@ -67,6 +73,7 @@ pub fn discover_candidates(
     config: &LlmConfig,
     text: &str,
     rules: RedactionRules,
+    ranges: &[RedactableRange],
 ) -> Result<Vec<Finding>> {
     let allowed_kinds = allowed_llm_kinds(rules);
     if allowed_kinds.is_empty() {
@@ -100,16 +107,34 @@ pub fn discover_candidates(
         "{}/v1/chat/completions",
         config.base_url.trim_end_matches('/')
     );
-    let client = reqwest::blocking::Client::new();
-    let response: ChatResponse = client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(LLM_REQUEST_TIMEOUT)
+        .build()
+        .context("failed to build Ollama HTTP client")?;
+    let mut response = client
         .post(endpoint)
         .json(&request)
         .send()
         .context("failed to call Ollama")?
         .error_for_status()
-        .context("Ollama returned an error response")?
-        .json()
-        .context("failed to decode Ollama response")?;
+        .context("Ollama returned an error response")?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_LLM_RESPONSE_BYTES as u64)
+    {
+        anyhow::bail!("Ollama response exceeds {MAX_LLM_RESPONSE_BYTES} bytes");
+    }
+    let mut response_body = Vec::new();
+    response
+        .by_ref()
+        .take((MAX_LLM_RESPONSE_BYTES + 1) as u64)
+        .read_to_end(&mut response_body)
+        .context("failed to read Ollama response")?;
+    if response_body.len() > MAX_LLM_RESPONSE_BYTES {
+        anyhow::bail!("Ollama response exceeds {MAX_LLM_RESPONSE_BYTES} bytes");
+    }
+    let response: ChatResponse =
+        serde_json::from_slice(&response_body).context("failed to decode Ollama response")?;
     let content = response
         .choices
         .into_iter()
@@ -117,7 +142,8 @@ pub fn discover_candidates(
         .context("Ollama response did not contain any choices")?
         .message
         .content;
-    parse_candidates(text, &content, rules)
+    let findings = parse_candidates(text, &content, rules)?;
+    Ok(filter_findings_to_ranges(findings, ranges))
 }
 
 #[cfg(not(feature = "ollama"))]
@@ -125,8 +151,20 @@ pub fn discover_candidates(
     _config: &LlmConfig,
     _text: &str,
     _rules: RedactionRules,
+    _ranges: &[RedactableRange],
 ) -> Result<Vec<Finding>> {
     anyhow::bail!("this binary was built without the `ollama` feature")
+}
+
+fn filter_findings_to_ranges(findings: Vec<Finding>, ranges: &[RedactableRange]) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .filter(|finding| {
+            ranges
+                .iter()
+                .any(|range| range.range.start <= finding.start && finding.end <= range.range.end)
+        })
+        .collect()
 }
 
 fn allowed_llm_kinds(rules: RedactionRules) -> Vec<&'static str> {
@@ -248,9 +286,9 @@ fn map_kind(kind: &str, rules: RedactionRules) -> Option<FindingKind> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FindingKind, RedactionRules};
+    use crate::{FindingKind, RedactionRules, input::RedactableRange};
 
-    use super::parse_candidates;
+    use super::{filter_findings_to_ranges, parse_candidates};
 
     #[test]
     fn parse_candidates_maps_duplicate_values_to_distinct_occurrences() {
@@ -311,6 +349,30 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(alice_positions, vec![(0, 5), (23, 28)]);
+    }
+
+    #[test]
+    fn llm_findings_are_limited_to_redactable_ranges() {
+        let text = "Alice in a header\nAlice in a hunk";
+        let findings = parse_candidates(
+            text,
+            r#"{"candidates":[{"kind":"person","value":"Alice"},{"kind":"person","value":"Alice"}]}"#,
+            RedactionRules::default().with_kind(FindingKind::Person, true),
+        )
+        .expect("parse candidates");
+        let filtered = filter_findings_to_ranges(
+            findings,
+            &[RedactableRange {
+                range: text.find("Alice in a hunk").expect("hunk")..text.len(),
+                file_path: None,
+            }],
+        );
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(
+            filtered[0].start,
+            text.find("Alice in a hunk").expect("hunk")
+        );
     }
 
     #[test]

@@ -48,10 +48,10 @@ async fn redact_text_inner(
     let policy = request
         .redaction
         .unwrap_or_else(|| state.redaction_policy.clone());
-    policy
-        .validate()
+    let redactor = RedactorBuilder::new()
+        .with_redaction_policy(policy)
+        .try_build()
         .map_err(|error| anyhow::anyhow!("invalid redaction policy: {error}"))?;
-    let redactor = RedactorBuilder::new().with_redaction_policy(policy).build();
 
     let secured = if let Some(external_id) = request.external_id {
         let store = state

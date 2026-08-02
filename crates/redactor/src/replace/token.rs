@@ -4,6 +4,7 @@ use std::ops::Range;
 
 pub(crate) const TOKEN_PREFIX: &str = "[[RDX:v2:";
 pub(crate) const TOKEN_SUFFIX: &str = "]]";
+pub(crate) const MAX_TOKEN_CANDIDATE_BYTES: usize = 4096;
 const CHECK_LEN: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,8 +68,7 @@ pub(crate) fn parse_token(candidate: &str) -> Result<ParsedToken, String> {
     })
 }
 
-pub(crate) fn token_like_ranges(text: &str) -> Vec<Range<usize>> {
-    let mut ranges = Vec::new();
+pub(crate) fn scan_token_like_ranges(text: &str, mut visit: impl FnMut(Range<usize>)) {
     let mut index = 0;
 
     while let Some(offset) = text[index..].find(TOKEN_PREFIX) {
@@ -77,13 +77,15 @@ pub(crate) fn token_like_ranges(text: &str) -> Vec<Range<usize>> {
         let end = if let Some(close_offset) = text[search_start..].find(TOKEN_SUFFIX) {
             search_start + close_offset + TOKEN_SUFFIX.len()
         } else {
-            text.len()
+            let mut end = (search_start + MAX_TOKEN_CANDIDATE_BYTES).min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            end
         };
-        ranges.push(start..end);
+        visit(start..end);
         index = end.max(start + TOKEN_PREFIX.len());
     }
-
-    ranges
 }
 
 pub(crate) fn random_scope_id() -> String {

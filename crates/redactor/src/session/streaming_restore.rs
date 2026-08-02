@@ -1,11 +1,9 @@
 use anyhow::Result;
 
-use crate::replace::{TOKEN_PREFIX, TOKEN_SUFFIX};
+use crate::replace::{MAX_TOKEN_CANDIDATE_BYTES, TOKEN_PREFIX, TOKEN_SUFFIX};
 use crate::{RedactionSession, RestorePermit, RestoreResult};
 
 use super::RestoreContext;
-
-const MAX_PENDING_BYTES: usize = 4096;
 
 /// Incrementally restores one decoded logical text stream.
 ///
@@ -56,13 +54,13 @@ impl<'a> StreamingRestoreContext<'a> {
 
     fn push_char(&mut self, ch: char, result: &mut RestoreResult) {
         if self.pending.starts_with(TOKEN_PREFIX)
-            && self.pending.len() + ch.len_utf8() > MAX_PENDING_BYTES
+            && self.pending.len() + ch.len_utf8() > MAX_TOKEN_CANDIDATE_BYTES
         {
             let overflow = std::mem::take(&mut self.pending);
             result.restored_text.push_str(&overflow);
             result.unresolved_tokens.push(overflow.clone());
             result.validation_errors.push(format!(
-                "token candidate exceeds {MAX_PENDING_BYTES} byte pending limit"
+                "token candidate exceeds {MAX_TOKEN_CANDIDATE_BYTES} byte pending limit"
             ));
         }
 
