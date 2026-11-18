@@ -128,10 +128,6 @@ UNLINK <key> [<key> ...]
 Repeat `SCAN` with the returned cursor until it returns `0`. The service never deletes legacy keys
 automatically.
 
-## Release flows
-
-- GitHub Actions validates and publishes `cloudiful-redactor` to crates.io on `v*` tags.
-
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
